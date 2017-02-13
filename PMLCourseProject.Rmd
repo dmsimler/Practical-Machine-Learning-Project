@@ -1,7 +1,7 @@
 ---
 title: "Practical Machine Learning Course Project"
 author: "David Simler"
-date: "January 17, 2017"
+date: "February 13, 2017"
 output:
   html_document: default
   pdf_document: default
@@ -23,7 +23,6 @@ Weight Lifting Exercise data will be read in and processed below according to th
 1. Read downloaded copies of the Weight Lifting Exercise (WLE) data into training and test data frames
 2. Remove unnecessary predictors from the WLE dataset
 3. Build candidate predication models 
-4. Create result datasets from model training / tuning data
 
 
 ```{r, echo=FALSE, warning=FALSE, results='hide', message=FALSE}
@@ -93,7 +92,7 @@ wleTrainingData$classe <- as.factor(wleTrainingData$classe)
 
 &nbsp;
 
-#### 2. Remove unnecessary predictors from the WLE dataset
+#### 2. Remove unnecessary predictors from the WLE datasets
 
 ```{r, echo=FALSE, results='hide'}
 
@@ -168,7 +167,7 @@ There are a large number of predictors in the WLE dataset that provide no real p
 * Columns with little or no variance
 * Columns whose removal will reduce the number of pair-wise correlations
 
-Given below is a code snippet that removes these types of columns from the WLE training datset:   
+Given below is a code snippet that removes these types of columns from the WLE training and test datsets:   
 **NOTE:** Actual code of the functions referenced below not shown.   
 &nbsp;
 
@@ -216,11 +215,27 @@ colnames(wleTrainingData)
 
 #### 3. Build candidate predication models
 
-Shown below is the general algorithm that will be used to split the data and train / tune candidate models using the functionality available in the Caret package:
+
+##### *Process Overview* 
+Shown below is the general process that will be used to split the data and train / tune candidate models using the functionality available in the *caret* R package:
+
+![Figure 1: Flow Chart of the model parameter tuning and cross-validation processing ](CrossValidationFlowChart.JPG)
+
+&nbsp;
 
 ##### *Split the training data* 
 
-Repeated k-fold cross-validation will be the strategy used to split the training data into multiple training / validation datasets.  In this case, there will be five repetitions each with ten folds for a total of 50 different training sets and 50 hold-out sets to estimate model performance for each candidate set of tuning parameters to try for a given model:
+As mentioned in the process flow-chart given above, repeated k-fold cross-validation was the strategy used to split the training data into multiple training / validation datasets.  This was chosen for the following reasons:
+
+* Using just a single train/test set (partitioned from the original train set) is a single evaluation of the model and has limited ability to characterize the uncertainty in the results.  This is especially true for tree-based classifiers.
+
+* Resampling methods such as this can produce reasonable predictions of how well the model will perform on future samples.
+
+* It is generally accepted that for medium sample sizes like this one, simple 10-fold cross-validation should provide acceptable variance, low bias (difference between the estimated and true values of
+performance), and is relatively quick to compute.  Research indicates that repeating k-fold crossvalidation
+can be used to effectively increase the precision of the performance estimates while still maintaining a small bias.  
+
+For this report, there will be five repetitions each with ten folds for a total of 50 different training sets and 50 hold-out sets to estimate model performance for each candidate set of tuning parameters to try for a given model:
 
 ```{r, echo=TRUE, cache=TRUE, warning=FALSE, message=FALSE}
 
@@ -234,7 +249,23 @@ modelTrainingControl <- trainControl(method = "repeatedcv", index = folds)
 
 ##### *Train / Tune candidate models* 
 
-Create several tree models
+Taking from the primary classifier types presented in the course, the following candidate models will be created, trained, and cross-validated using the caret train method (which implements much of the process described above):
+
+* A single decision tree (rpart)
+
+* A bagged set of decision trees (treebag)
+
+* A random forest (rf) - usually the best out-of-the-box classifier
+
+* A stochastic gradient boosting tree (gbm) - used in the course
+
+* An extreme boosted gradient decision tree model (xgbTree) - often a winner in Kaggle competitions
+
+* A naive bayes (nb) cl
+
+* A linear disciminant analysis (lda) classifier
+
+First the tree-based models are trained:
 
 ```{r, echo=TRUE, cache=TRUE, warning=FALSE, message=FALSE}
 
@@ -285,7 +316,6 @@ ldaFit <- train(x = wleTrainingData[, -ncol(wleTrainingData)], y = wleTrainingDa
 
 &nbsp;
 
-#### 4. Create result datasets from model training / tuning data
 
 ```{r, echo=FALSE, results='hide'}
 
@@ -354,6 +384,7 @@ CreateModelTuningSummaries <- function(modelList)
     # Create a row summarizing the performance and tuning of the current model
     currentModelSummary <- data.frame(Model = model$method, 
                                       OOSError = 1 - max(model$results$Accuracy),
+                                      TotalTrainingTime = model$times$everything[3],
                                       TuningParameters = currentModelTuneParamList,
                                       stringsAsFactors = FALSE)
     
@@ -367,6 +398,13 @@ CreateModelTuningSummaries <- function(modelList)
       allModelSummaries <- rbind(allModelSummaries, currentModelSummary, stringsAsFactors = FALSE)
     } #end else
   } # end for
+  
+  # Kill the row names
+  rownames(allModelSummaries) <- NULL
+  
+  # Now give more friendly names to the columns for plotting
+  colnames(allModelSummaries) <- c("Model", "OOS Error", "Training Time (secs)",
+                                   "Final Tuning Parameters")
   
   # Now returns the results
   return (allModelSummaries)
@@ -469,44 +507,12 @@ CreateModelPerfAssessments <- function(modelPerfComparisons, comparisonLevelOrde
   allPerfAssessments$DiffName <- factor(allPerfAssessments$DiffName, levels = comparisonLevelOrder)
   allPerfAssessments <- allPerfAssessments[order(allPerfAssessments$DiffName), ]
   
-  # Now give more friendly names to some of the columns
+  # Now give more friendly names to the columns for plotting
   colnames(allPerfAssessments) <- c("Model 1", "Model 2", "DiffName", "Mean Error Difference", "p-value",
                                     "t-statistic", "Reject $H_{0}$")
   
   return (allPerfAssessments)
 } # end CreateModelPerfAssessments
-
-
-# As the training times vary widely from algorithm to algorithm due to differences in complexity and 
-# could be of interest when understanding overall model maintenance costs, create a function that 
-# builds a dataset collecting training times across all models.
-CreateModelTrainTimesDataset <- function(modelList)
-{
-  allModelTrainTimes <- NULL
-  
-  for (model in modelList)
-  {
-    currentModelTrainTimes <- data.frame(Model = model$method, 
-                                         TotalTrainTime = model$times$everything[3],
-                                         FinalModelTrainTime = model$times$final[3],
-                                         stringsAsFactors = FALSE)
-    
-    if (is.null(allModelTrainTimes))
-    {
-      allModelTrainTimes <- currentModelTrainTimes
-    } # end if
-    else
-    {
-      allModelTrainTimes <- rbind(allModelTrainTimes, currentModelTrainTimes, stringsAsFactors = FALSE)
-    } # end else
-  } # end for
-
-  # Relevel the model name according to the total training time in descending order  
-  allModelTrainTimes <- allModelTrainTimes[order(allModelTrainTimes$TotalTrainTime, decreasing = TRUE), ]
-  allModelTrainTimes$Model <- factor(allModelTrainTimes$Model, levels = allModelTrainTimes$Model)
-  
-  return (allModelTrainTimes)
-} # end CreateModelTrainTimesDataset
 
 
 ModelComparisonOrderedLevels <- c("rf - xgbTree", "rf - treebag", "rf - gbm",
@@ -525,13 +531,6 @@ ModelComparisonOrderedLevels <- c("rf - xgbTree", "rf - treebag", "rf - gbm",
                                   "rpart - rf", "rpart - xgbTree", "rpart - treebag", 
                                   "rpart - gbm", "rpart - nb",  "rpart - lda")
 
-```
-
-In order to better enable the creation of the plots and tables presented in the Results section found later in this document, some new datasets will be created from the data returned by the model training / process performed above.  
-**NOTE:** Actual code of the functions referenced below not shown.   
-&nbsp;
-
-```{r, echo=TRUE, results='hide'}
 
 CreateModelingResultsDatasets <- function(...)
 {
@@ -541,14 +540,12 @@ CreateModelingResultsDatasets <- function(...)
   finalModelSummaries <- CreateModelTuningSummaries(modelList)
   perfComparisons <- CreateModelPerfCompDataset(modelsOOSErrors, ModelComparisonOrderedLevels)
   perfAssessments <- CreateModelPerfAssessments(perfComparisons, ModelComparisonOrderedLevels)
-  trainTimes <- CreateModelTrainTimesDataset(modelList)
-  
+
   # Now return the results in a list
   resultsList <- list(ModelOOSErrors = modelsOOSErrors,
                       FinalModelSummaries = finalModelSummaries,
                       ModelPerfComparisons = perfComparisons,
-                      ModelPerfAssessments = perfAssessments,
-                      ModelTrainTimes = trainTimes)
+                      ModelPerfAssessments = perfAssessments)
 } # end CreateModelingResultsDatasets
 
 # Now build the list of datasets bringing together all the modeling results
@@ -576,24 +573,14 @@ pander(modelingResults$FinalModelSummaries, caption = "Table 1: Out-of-sample er
 ```
 
 
-Then we do a box plot of the various out-of-sample error rates by model in decreasing order:
+Additionally to better visualize the estimated variance for each model, given below is a box plot of the out-of-sample error rates by model in decreasing order:
 
 
-```{r, echo=FALSE, fig.path="figures/", fig.align='center', fig.cap='Figure 1: Distribution of the out-of-sample errors across 50 folds for the different models', fig.height=3, fig.show='asis'}
+```{r, echo=FALSE, fig.path="figures/", fig.align='center', fig.cap='Figure 2: Distribution of the out-of-sample errors across 50 folds for the different models', fig.height=5, fig.show='asis'}
 
 ggplot(modelingResults$ModelOOSErrors) + 
   geom_boxplot(notch=TRUE, fill="red", aes(x=Model, y=OOSError)) + 
   xlab("Model Type") + ylab("Out of Sample Error")
-
-```
-
-In addition to varying with regard to out-of-sample error performance, training times have also varied widely across algorithms as shown below:
-
-```{r, echo=FALSE, fig.path="figures/", fig.align='center', fig.height=3, fig.cap='Figure 2: Overall training times for each model created, including each train/cv iteration and creation of a final model from best parameters', fig.show='asis'}
-
-ggplot(modelingResults$ModelTrainTimes) + 
-       geom_bar(aes(x=factor(Model), weight=TotalTrainTime), fill="red") +
-       xlab("Model Type") + ylab("Total Training Time (in seconds)")
 
 ```
 
