@@ -1,0 +1,726 @@
+---
+title: "Practical Machine Learning Course Project"
+author: "David Simler"
+date: "January 17, 2017"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Synopsis
+
+
+*****
+
+
+## Processing
+Weight Lifting Exercise data will be read in and processed below according to the following high-level steps:
+
+1. Read downloaded copies of the Weight Lifting Exercise (WLE) data into training and test data frames
+2. Remove unnecessary predictors from the WLE dataset
+3. Build candidate predication models 
+4. Create result datasets from model training / tuning data
+
+
+```{r, echo=FALSE, warning=FALSE, results='hide', message=FALSE}
+
+# Include the R packages providing functionality used somewhere in this report.
+library(corrplot)
+library(rpart)
+library(ggplot2)
+library(survival)
+library(lattice)
+library(splines)
+library(parallel)
+library(randomForest)
+library(ipred)
+library(e1071)
+library(plyr)
+library(gbm)
+library(MASS)
+library(klaR)
+library(xgboost)
+library(caret)
+library(knitr)
+library(pander)
+library(gtools)
+library(gridExtra)
+
+```
+
+&nbsp;
+
+#### 1. Read downloaded copies of the Weight Lifting Exercise (WLE) data into training and test data frames
+The WLE dataset train and test datasets were first manually downloaded to the project working directory from [here:](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv) and [here:](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv)
+
+The code below then reads those csv files into respective data frames:
+```{r, echo=TRUE, warning=FALSE}
+
+# Set the current working directory to where there data file will be
+setwd('C:/DMS PC Backup/Coursera Courses/Practical Machine Learning/Project')
+
+# Set a seed value to use consistently in this document
+reportSeedToUse <- 2345
+
+# Read in the data set and convert some fields of interest to the appropriate type
+wleTrainingData <- read.csv('pml-training.csv', stringsAsFactors = FALSE)
+
+# Read in the test set at the same time
+wleTestData <- read.csv('pml-testing.csv', stringsAsFactors = FALSE)
+
+```
+
+The types of certain key fields now need to be cast to their proper types in order to work with the analysis to follow: 
+
+```{r, echo=TRUE, warning=FALSE}
+
+# Cast the kurtosis, skewness, and some yaw fields, which have blanks for missing data to a numeric
+for (index in c(12:17, 20, 23, 26, 69:74, 87:92, 95, 98, 101, 125:130, 133, 136, 139)) 
+  wleTrainingData[, index] <- as.numeric(wleTrainingData[, index])
+
+# Do the same for the test set
+for (index in c(12:17, 20, 23, 26, 69:74, 87:92, 95, 98, 101, 125:130, 133, 136, 139)) 
+  wleTestData[, index] <- as.numeric(wleTestData[, index])
+
+# The target class field should be a factor
+wleTrainingData$classe <- as.factor(wleTrainingData$classe)
+
+```
+
+&nbsp;
+
+#### 2. Remove unnecessary predictors from the WLE dataset
+
+```{r, echo=FALSE, results='hide'}
+
+# ###################################################################################################
+# Functions used to identify the various predictors that won't provide much predictive value and 
+# could be removed from the training dataset.
+# ###################################################################################################
+
+# Function to identifiy predictors whose values show very little variance and thus have very little
+# predictive value
+FindNearZeroVarPredictors <- function(trainingData, targetColIndex)
+{
+  zeroVarVarsToRemove <- nearZeroVar(trainingData[, -targetColIndex])
+  return(zeroVarVarsToRemove)
+} # end FindNearZeroVarPredictors
+
+
+# Function to find predictors that could be removed are highly coorelated with each other
+FindRemovableCorrelatedPredictors <- function(trainingData, targetColIndex, correlationThreshold)
+{
+  correlations <- cor(trainingData[, -targetColIndex], use = "na.or.complete")
+  correlatedVarsToRemove <- findCorrelation(correlations, cutoff = correlationThreshold)
+  
+  return (correlatedVarsToRemove)
+} # end FindRemovableCorrelatedPredictors
+
+
+# Function that calculates the percentage of rows with missing data per column per class (A, B, C, etc.) 
+FindColsWithMostlyNAPerClass <- function(trainingData, targetColIndex, naPctThreshold)
+{
+  # Initialize a dataframe to hold the calculated percentages of missing values by column and class
+  targetClasses <- unique(trainingData[, targetColIndex])
+  naPctPerColPerClass <- data.frame(classe = targetClasses)
+  
+  for(colName in colnames(trainingData[, -targetColIndex])) 
+    naPctPerColPerClass <- cbind(naPctPerColPerClass, rep(0.0, length(targetClasses)))
+  
+  colnames(naPctPerColPerClass)[2:ncol(trainingData)] <- colnames(trainingData[, -targetColIndex])
+  
+  # Now calculate the actual percentage of missing values for each column for the rows belonging to a
+  # given target class
+  for (currentClass in targetClasses)
+  {
+    # Grab the rows that belong to the current class being processed
+    classRows <- trainingData[, targetColIndex] == currentClass
+    classDataSubset <- trainingData[classRows, ]
+    numSamplesInClass <- nrow(classDataSubset)
+    
+    # Find the rows for the current class being processed
+    naMappingRowIndex <- which(naPctPerColPerClass$classe == currentClass)
+    
+    for (currentColIndex in 2:ncol(naPctPerColPerClass))
+    {
+      # Calculate the percentage of samples in this class that have an NA for this column
+      naPctPerColPerClass[naMappingRowIndex, currentColIndex] <- 
+        sum(is.na(classDataSubset[, currentColIndex - 1])) / numSamplesInClass
+    } # end for
+  } # end for
+
+  # Return the NA pct per col per class
+  colsWithMostlyNA <- which(colMeans(naPctPerColPerClass[, -1]) > naPctThreshold)
+    
+  return (colsWithMostlyNA)
+} # end FindColsWithMostlyNAPerClass
+
+```
+
+There are a large number of predictors in the WLE dataset that provide no real predictive value and could adversely affect the performance of certain types of models.  Those predictors will fall into one or more of the following categories and will need to be removed from the training dataset:
+
+* IDs or timestamps
+* Columns that have an average percentage of missing values per class above a certain threshold
+* Columns with little or no variance
+* Columns whose removal will reduce the number of pair-wise correlations
+
+Given below is a code snippet that removes these types of columns from the WLE training datset:   
+**NOTE:** Actual code of the functions referenced below not shown.   
+&nbsp;
+
+```{r, echo=TRUE, cache=TRUE}
+
+# First remove predictors that are IDs or timestamps that have no predictive value
+colsWithTimestampsOrIDs <- c(1:7)
+wleTrainingData <- wleTrainingData[, -colsWithTimestampsOrIDs]
+wleTestData <- wleTestData[, -colsWithTimestampsOrIDs]
+
+# Next remove those remaining columns that have near zero variance
+colsWithNearZeroVar <- FindNearZeroVarPredictors(wleTrainingData, ncol(wleTrainingData))
+wleTrainingData <- wleTrainingData[, -colsWithNearZeroVar]
+wleTestData <- wleTestData[, -colsWithNearZeroVar]
+
+# Now remove those columns from the dataset have an average percentage of missing values per class
+# above 95% 
+colsWithMostlyNA <- FindColsWithMostlyNAPerClass(wleTrainingData, ncol(wleTrainingData), 0.95)
+wleTrainingData <- wleTrainingData[, -colsWithMostlyNA]
+wleTestData <- wleTestData[, -colsWithMostlyNA]
+
+# Finally remove those columns that will reduce pair-wise correlations
+colsToReduceCorrelations <- FindRemovableCorrelatedPredictors(wleTrainingData, ncol(wleTrainingData), 0.8)
+wleTrainingData <- wleTrainingData[, -colsToReduceCorrelations]
+wleTestData <- wleTestData[, -colsToReduceCorrelations]
+
+```
+
+Given below is a final tally of the number of columns removed and those that still remain:
+
+```{r, echo=TRUE}
+
+# Print the count of columns removed and the number that are left
+numColsRemoved <- length(colsWithTimestampsOrIDs) + length(colsWithNearZeroVar) + 
+                  length(colsWithMostlyNA) + length(colsToReduceCorrelations)
+print(sprintf("Number of columns removed = %d, Number of columns remaining in the training set = %d", 
+              numColsRemoved, ncol(wleTrainingData)))
+
+# Show the names of the reminaing columns in the training and test sets
+colnames(wleTrainingData)
+
+```
+
+&nbsp;
+
+#### 3. Build candidate predication models
+
+Shown below is the general algorithm that will be used to split the data and train / tune candidate models using the functionality available in the Caret package:
+
+##### *Split the training data* 
+
+Repeated k-fold cross-validation will be the strategy used to split the training data into multiple training / validation datasets.  In this case, there will be five repetitions each with ten folds for a total of 50 different training sets and 50 hold-out sets to estimate model performance for each candidate set of tuning parameters to try for a given model:
+
+```{r, echo=TRUE, cache=TRUE, warning=FALSE, message=FALSE}
+
+set.seed(reportSeedToUse)
+folds <- createMultiFolds(wleTrainingData$classe, k = 10, times = 5)
+
+# Define the set of parameters to be used across all models for training and tuning
+modelTrainingControl <- trainControl(method = "repeatedcv", index = folds)
+
+```
+
+##### *Train / Tune candidate models* 
+
+Create several tree models
+
+```{r, echo=TRUE, cache=TRUE, warning=FALSE, message=FALSE}
+
+set.seed(reportSeedToUse)
+rpartFit <- train(x = wleTrainingData[, -ncol(wleTrainingData)], y = wleTrainingData$classe,
+                  method = "rpart", 
+                  trControl = modelTrainingControl)
+
+set.seed(reportSeedToUse)
+baggedTreeFit <- train(x = wleTrainingData[, -ncol(wleTrainingData)], y = wleTrainingData$classe,
+                       method = "treebag", 
+                       trControl = modelTrainingControl)
+
+set.seed(reportSeedToUse)
+rfFit <- train(x = wleTrainingData[, -ncol(wleTrainingData)], y = wleTrainingData$classe,
+               method = "rf", 
+               trControl = modelTrainingControl)
+
+set.seed(reportSeedToUse)
+gbmFit <- train(x = wleTrainingData[, -ncol(wleTrainingData)], y = wleTrainingData$classe,
+                method = "gbm", 
+                trControl = modelTrainingControl,
+                verbose = FALSE)
+
+set.seed(reportSeedToUse)
+xgboostFit <- train(x = wleTrainingData[, -ncol(wleTrainingData)], y = wleTrainingData$classe,
+                    method = "xgbTree", 
+                    trControl = modelTrainingControl,
+                    verbose = FALSE)
+
+```
+
+Now build model-based classifiers:
+
+```{r, echo=TRUE, cache=TRUE, warning=FALSE, message=FALSE}
+
+set.seed(reportSeedToUse)
+naiveBayesFit <- train(x = wleTrainingData[, -ncol(wleTrainingData)], y = wleTrainingData$classe,
+                       method = "nb", 
+                       trControl = modelTrainingControl)
+
+set.seed(reportSeedToUse)
+ldaFit <- train(x = wleTrainingData[, -ncol(wleTrainingData)], y = wleTrainingData$classe,
+                       method = "lda", 
+                       trControl = modelTrainingControl)
+
+```
+
+&nbsp;
+
+#### 4. Create result datasets from model training / tuning data
+
+```{r, echo=FALSE, results='hide'}
+
+# First, we need a function to build a dataframe holding all the out-of-sample errors for all 
+# the models created above:
+CreateModelsOOSErrorDataset <- function(modelList)
+{
+  allModelsOOSErrors <- NULL
+  for(model in modelList)
+  {
+    currentModelOOSErrors <- data.frame(Model = model$method, FoldName = model$resample$Resample,
+                                        OOSError = (1 - model$resample$Accuracy), 
+                                        stringsAsFactors = FALSE)
+    
+    if (is.null(allModelsOOSErrors)) 
+    {
+      allModelsOOSErrors <- currentModelOOSErrors
+    } # end if
+    else
+    {
+      allModelsOOSErrors <- rbind(allModelsOOSErrors, currentModelOOSErrors, stringsAsFactors = FALSE)
+    } # end else
+  } # end for
+  
+  # Relevel the model factor to be in ascending order according to the mean of its OOSErrors
+  OOSMeans <- aggregate(OOSError ~ Model, data = allModelsOOSErrors, FUN = "mean")
+  OOSMeans <- OOSMeans[order(OOSMeans$OOSError, decreasing = TRUE), ]
+  allModelsOOSErrors$Model <- factor(allModelsOOSErrors$Model, levels = OOSMeans$Model)
+
+  return (allModelsOOSErrors)
+} # end CreateModelsOOSErrorDataset
+
+
+# Now create a function that builds a dataframe summarizing the error estimation and hyper-parameter
+# values for the final model chosen (by caret) for each model type trained.
+CreateModelTuningSummaries <- function(modelList)
+{
+  allModelSummaries <- NULL
+  
+  for (model in modelList)
+  {
+    # First create a string with all of the final model tuning parameter values for the current
+    # model type
+    currentModelTuneParamList <- ""
+    
+    for (paramIndex in 1:ncol(model$bestTune))
+    {
+      paramVal <- model$bestTune[1, paramIndex]
+      paramName <- colnames(model$bestTune)[paramIndex]
+      
+      if(is.numeric(paramVal))
+      {
+        # Only format as a decimal if there is a decimal portion
+        tuneParam <- ifelse((round(paramVal) != paramVal), 
+                            sprintf("%s = %f ", paramName, paramVal),
+                            paste(paramName," = ", paramVal, " ", sep = ""))
+      } # end if
+      else
+      {
+        tuneParam <- paste(paramName," = ", paramVal, " ", sep = "")
+      } # end else
+      
+      currentModelTuneParamList <- paste(currentModelTuneParamList, tuneParam, sep = "")
+    } # end for
+    
+    # Create a row summarizing the performance and tuning of the current model
+    currentModelSummary <- data.frame(Model = model$method, 
+                                      OOSError = 1 - max(model$results$Accuracy),
+                                      TuningParameters = currentModelTuneParamList,
+                                      stringsAsFactors = FALSE)
+    
+    # Now add the current model summary to the overall model summary dataset
+    if (is.null(allModelSummaries))
+    {
+      allModelSummaries <- currentModelSummary
+    } # end if
+    else
+    {
+      allModelSummaries <- rbind(allModelSummaries, currentModelSummary, stringsAsFactors = FALSE)
+    } #end else
+  } # end for
+  
+  # Now returns the results
+  return (allModelSummaries)
+} # end CreateModelTuningSummaries
+
+
+# Now create a function that builds a dataframe with the difference in error rates between models,
+# comparing two at a time.  This will be used to calculate statistics needed for model selection 
+# later in this document.
+CreateModelPerfCompDataset <- function(modelsOOSErrors, comparisonLevelOrder)
+{
+  # Get a list of all the different models in the dataset and then create the set of model by model 
+  # comparisons that need to be made
+  modelNames <- levels(modelsOOSErrors$Model)
+  modelComparisonsToMake <- permutations(length(modelNames), 2, modelNames)
+
+  allComparisons <- NULL
+  for(comparisonIndex in 1:nrow(modelComparisonsToMake))
+  {
+    # Grab the out-of-sample error data for each model
+    model1Name <- modelComparisonsToMake[comparisonIndex, 1]
+    model2Name <- modelComparisonsToMake[comparisonIndex, 2]
+    diffName <- paste(model1Name, " - ", model2Name, sep = "")
+    model1Errors <- subset(modelsOOSErrors, modelsOOSErrors$Model == model1Name)
+    model2Errors <- subset(modelsOOSErrors, modelsOOSErrors$Model == model2Name)
+    
+    # Now sort each vector by the fold name, so we're subtracting measurements for the same folds
+    model1Errors <- model1Errors[order(model1Errors$FoldName), ]
+    model2Errors <- model2Errors[order(model2Errors$FoldName), ]
+    errorDiff = model1Errors$OOSError - model2Errors$OOSError
+    
+    # Compile the results into a temporary dataframe
+    currentComparison <- data.frame(Model1 = model1Name, 
+                                    Model2 = model2Name,
+                                    DiffName = diffName,
+                                    OOSErrorDiff = errorDiff,
+                                    FoldName = model1Errors$FoldName,
+                                    stringsAsFactors = FALSE)
+    
+    # Now add the current comparison data to the larger dataset
+    if (is.null(allComparisons))
+    {
+      allComparisons <- currentComparison
+    } # end if
+    else
+    {
+      allComparisons <- rbind(allComparisons, currentComparison, stringsAsFactors = FALSE)
+    } # end else
+  } # end for
+  
+  # Relevel the combined diff name according to the order specified by the caller
+  allComparisons$DiffName <- factor(allComparisons$DiffName, levels = comparisonLevelOrder)
+  allComparisons <- allComparisons[order(allComparisons$DiffName, decreasing = TRUE), ]
+
+  return (allComparisons)
+} # end CreateModelPerfCompDataset
+
+
+# Leveraging the dataframe of the out-of-sample error differences between two models, create a function
+# that analyzes the statistical significance of those differences using a t-test and saves the results 
+# in a dataframe.
+CreateModelPerfAssessments <- function(modelPerfComparisons, comparisonLevelOrder)
+{
+  # First, compile a list of unique model-to-model comparisons that are in the dataset
+  modelComparisons <- unique(modelPerfComparisons[, c("Model1", "Model2")])
+  
+  # Now traverse each comparison, perform a t-test on the data, and add the results to a
+  # cumulative dataset
+  significanceLevel <- 0.05 / nrow(modelComparisons)
+  confidenceLevel <- 1 - significanceLevel
+  allPerfAssessments <- NULL
+  
+  for (comparisonIndex in 1:nrow(modelComparisons))
+  {
+    errorDiffs <- subset(modelPerfComparisons, 
+                         (Model1 == modelComparisons[comparisonIndex, 1]) & 
+                         (Model2 == modelComparisons[comparisonIndex, 2]))  
+    meanDiff <- mean(errorDiffs$OOSErrorDiff)
+    tResult <- t.test(errorDiffs$OOSErrorDiff, alternative = "less", conf.level = confidenceLevel)
+    currentPerfAssessment <- data.frame(Model1 = modelComparisons[comparisonIndex, 1], 
+                                        Model2 = modelComparisons[comparisonIndex, 2], 
+                                        DiffName = paste(modelComparisons[comparisonIndex, 1], " - ",
+                                                         modelComparisons[comparisonIndex, 2], sep=""),
+                                        OOSErrorMeanDiff = meanDiff, P.Value = tResult$p.value,
+                                        T.Stat = tResult$statistic, 
+                                        RejectH0 = tResult$p.value < significanceLevel,
+                                        stringsAsFactors = FALSE)
+    
+    if (is.null(allPerfAssessments))
+    {
+      allPerfAssessments <- currentPerfAssessment
+    } # end if
+    else
+    {
+      allPerfAssessments <- rbind(allPerfAssessments, currentPerfAssessment, stringsAsFactors = FALSE)
+    }# end else
+  } # end for
+  
+  # Relevel the DiffName factor to be in ascending order according to the mean of its diff OOSErrors
+  allPerfAssessments$DiffName <- factor(allPerfAssessments$DiffName, levels = comparisonLevelOrder)
+  allPerfAssessments <- allPerfAssessments[order(allPerfAssessments$DiffName), ]
+  
+  # Now give more friendly names to some of the columns
+  colnames(allPerfAssessments) <- c("Model 1", "Model 2", "DiffName", "Mean Error Difference", "p-value",
+                                    "t-statistic", "Reject $H_{0}$")
+  
+  return (allPerfAssessments)
+} # end CreateModelPerfAssessments
+
+
+# As the training times vary widely from algorithm to algorithm due to differences in complexity and 
+# could be of interest when understanding overall model maintenance costs, create a function that 
+# builds a dataset collecting training times across all models.
+CreateModelTrainTimesDataset <- function(modelList)
+{
+  allModelTrainTimes <- NULL
+  
+  for (model in modelList)
+  {
+    currentModelTrainTimes <- data.frame(Model = model$method, 
+                                         TotalTrainTime = model$times$everything[3],
+                                         FinalModelTrainTime = model$times$final[3],
+                                         stringsAsFactors = FALSE)
+    
+    if (is.null(allModelTrainTimes))
+    {
+      allModelTrainTimes <- currentModelTrainTimes
+    } # end if
+    else
+    {
+      allModelTrainTimes <- rbind(allModelTrainTimes, currentModelTrainTimes, stringsAsFactors = FALSE)
+    } # end else
+  } # end for
+
+  # Relevel the model name according to the total training time in descending order  
+  allModelTrainTimes <- allModelTrainTimes[order(allModelTrainTimes$TotalTrainTime, decreasing = TRUE), ]
+  allModelTrainTimes$Model <- factor(allModelTrainTimes$Model, levels = allModelTrainTimes$Model)
+  
+  return (allModelTrainTimes)
+} # end CreateModelTrainTimesDataset
+
+
+ModelComparisonOrderedLevels <- c("rf - xgbTree", "rf - treebag", "rf - gbm",
+                                  "rf - nb", "rf - lda", "rf - rpart",
+                                  "xgbTree - rf", "xgbTree - treebag", "xgbTree - gbm",
+                                  "xgbTree - nb", "xgbTree - lda", 
+                                  "xgbTree - rpart", 
+                                  "treebag - rf", "treebag - xgbTree", "treebag - gbm", 
+                                  "treebag - nb", "treebag - lda", "treebag - rpart", 
+                                  "gbm - rf", "gbm - xgbTree", "gbm - treebag", 
+                                  "gbm - nb", "gbm - lda", "gbm - rpart", 
+                                  "nb - rf", "nb - xgbTree", "nb - treebag", 
+                                  "nb - gbm", "nb - lda", "nb - rpart", 
+                                  "lda - rf", "lda - xgbTree", "lda - treebag", 
+                                  "lda - gbm", "lda - nb", "lda - rpart",
+                                  "rpart - rf", "rpart - xgbTree", "rpart - treebag", 
+                                  "rpart - gbm", "rpart - nb",  "rpart - lda")
+
+```
+
+In order to better enable the creation of the plots and tables presented in the Results section found later in this document, some new datasets will be created from the data returned by the model training / process performed above.  
+**NOTE:** Actual code of the functions referenced below not shown.   
+&nbsp;
+
+```{r, echo=TRUE, results='hide'}
+
+CreateModelingResultsDatasets <- function(...)
+{
+  modelList <- list(...)
+
+  modelsOOSErrors <- CreateModelsOOSErrorDataset(modelList)
+  finalModelSummaries <- CreateModelTuningSummaries(modelList)
+  perfComparisons <- CreateModelPerfCompDataset(modelsOOSErrors, ModelComparisonOrderedLevels)
+  perfAssessments <- CreateModelPerfAssessments(perfComparisons, ModelComparisonOrderedLevels)
+  trainTimes <- CreateModelTrainTimesDataset(modelList)
+  
+  # Now return the results in a list
+  resultsList <- list(ModelOOSErrors = modelsOOSErrors,
+                      FinalModelSummaries = finalModelSummaries,
+                      ModelPerfComparisons = perfComparisons,
+                      ModelPerfAssessments = perfAssessments,
+                      ModelTrainTimes = trainTimes)
+} # end CreateModelingResultsDatasets
+
+# Now build the list of datasets bringing together all the modeling results
+modelingResults <- CreateModelingResultsDatasets(rfFit, xgboostFit, baggedTreeFit, gbmFit, 
+                                                 naiveBayesFit, ldaFit, rpartFit)
+
+
+```
+
+
+*****
+
+
+## Findings
+
+#### Model Training / Tuning Results
+
+First, presented below are the results of the tuning and final models:
+
+```{r, echo=FALSE, fig.align='center', results="asis"}
+
+panderOptions('table.alignment.default',"left")
+pander(modelingResults$FinalModelSummaries, caption = "Table 1: Out-of-sample errors and final model parameters for the candidate classification models created above.")
+
+```
+
+
+Then we do a box plot of the various out-of-sample error rates by model in decreasing order:
+
+
+```{r, echo=FALSE, fig.path="figures/", fig.align='center', fig.cap='Figure 1: Distribution of the out-of-sample errors across 50 folds for the different models', fig.height=3, fig.show='asis'}
+
+ggplot(modelingResults$ModelOOSErrors) + 
+  geom_boxplot(notch=TRUE, fill="red", aes(x=Model, y=OOSError)) + 
+  xlab("Model Type") + ylab("Out of Sample Error")
+
+```
+
+In addition to varying with regard to out-of-sample error performance, training times have also varied widely across algorithms as shown below:
+
+```{r, echo=FALSE, fig.path="figures/", fig.align='center', fig.height=3, fig.cap='Figure 2: Overall training times for each model created, including each train/cv iteration and creation of a final model from best parameters', fig.show='asis'}
+
+ggplot(modelingResults$ModelTrainTimes) + 
+       geom_bar(aes(x=factor(Model), weight=TotalTrainTime), fill="red") +
+       xlab("Model Type") + ylab("Total Training Time (in seconds)")
+
+```
+
+&nbsp;
+
+#### Statistical Comparison of Models
+
+In order to understand which models are truly the best for the WLE data, it is necessary to calculate the difference in the out-of-sample errors doing pair-wise model comparisons, and then running t-tests on those pair-wise differences to determine statistical significance.
+
+First, the difference in out-of-sample error between each model (model 1) and EVERY other model (model 2) is calculated according to the following formula:
+
+$OOS Error Difference = OOSError_{model1} - OOSError_{model2}$;
+
+The boxplots of these differences are then shown below for each model:
+
+```{r, echo=FALSE, fig.path="figures/", fig.align='center', fig.cap='Figure 3: Distribution of the difference between out-of-sample errors across 50 folds for the different model pairwise comparisons', fig.height=10, fig.show='asis'}
+
+# Make separate distinct plots for the differences between each model and all the others
+xgbTreeComps <- subset(modelingResults$ModelPerfComparisons, Model1 == "xgbTree")
+
+
+rfCompPlot <- ggplot(subset(modelingResults$ModelPerfComparisons, Model1 == "rf")) + 
+                     geom_boxplot(notch=TRUE, fill="red", aes(x=DiffName, y=OOSErrorDiff)) + 
+                     coord_flip() + 
+                     xlab("Model Pairwise Comparison") + ylab("Mean Error Difference ") + 
+                     ggtitle("rf Comparisons")
+
+xgbCompPlot <- ggplot(subset(modelingResults$ModelPerfComparisons, Model1 == "xgbTree")) + 
+                      geom_boxplot(notch=TRUE, fill="red", aes(x=DiffName, y=OOSErrorDiff)) + 
+                      coord_flip() + 
+                      xlab("Model Pairwise Comparison") + ylab("Mean Error Difference ") +
+                      ggtitle("xgbTree Comparisons")
+
+bagCompPlot <- ggplot(subset(modelingResults$ModelPerfComparisons, Model1 == "treebag")) + 
+                      geom_boxplot(notch=TRUE, fill="red", aes(x=DiffName, y=OOSErrorDiff)) + 
+                      coord_flip() + 
+                      xlab("Model Pairwise Comparison") + ylab("Mean Error Difference ") +
+                      ggtitle("treebag comparisons")
+
+gbmCompPlot <- ggplot(subset(modelingResults$ModelPerfComparisons, Model1 == "gbm")) + 
+                      geom_boxplot(notch=TRUE, fill="red", aes(x=DiffName, y=OOSErrorDiff)) + 
+                      coord_flip() + 
+                      xlab("Model Pairwise Comparison") + ylab("Mean Error Difference ") +
+                      ggtitle("gbm Comparisons")
+
+nbCompPlot <- ggplot(subset(modelingResults$ModelPerfComparisons, Model1 == "nb")) + 
+                     geom_boxplot(notch=TRUE, fill="red", aes(x=DiffName, y=OOSErrorDiff)) + 
+                     coord_flip() + 
+                     xlab("Model Pairwise Comparison") + ylab("Mean Error Difference ") +
+                     ggtitle("nb Comparisons")
+  
+  
+ldaCompPlot <- ggplot(subset(modelingResults$ModelPerfComparisons, Model1 == "lda")) + 
+                      geom_boxplot(notch=TRUE, fill="red", aes(x=DiffName, y=OOSErrorDiff)) + 
+                      coord_flip() + 
+                      xlab("Model Pairwise Comparison") + ylab("Mean Error Difference ") +
+                      ggtitle("lda Comparisons")
+
+rpartCompPlot <- ggplot(subset(modelingResults$ModelPerfComparisons, Model1 == "rpart")) + 
+                        geom_boxplot(notch=TRUE, fill="red", aes(x=DiffName, y=OOSErrorDiff)) + 
+                        coord_flip() + 
+                        xlab("Model Pairwise Comparison") + ylab("Mean Error Difference ") +
+                        ggtitle("rpart Comparisons")
+  
+grid.arrange(rfCompPlot, xgbCompPlot, bagCompPlot, gbmCompPlot, nbCompPlot, ldaCompPlot, rpartCompPlot,
+             nrow = 4, ncol = 2)
+
+```
+
+&nbsp;
+
+Next, perform a t-test on each model comparison's mean difference in out-of-sample error according to the following hypotheses:
+
+$H_{0}: \mu_{OOSError, model1} - \mu_{OOSError, model2} = 0$;   $H_{a}: \mu_{OOSError, model1} - \mu_{OOSError, model2} < 0$
+
+For the above, the significance level $\alpha$ will need to be adjusted lower to $\alpha / m$ (i.e. the *Bonferroni correction*) in order to reject $H_{0}$ as the chance of a rare event increases with multiple comparisons, and therefore, the likelihood of incorrectly rejecting $H_{0}$ increases.  
+Here $m = n! / (n - k)!$, where **m** = total number of comparisons, **n** = number of models, and **k** = number of models in a single comparison. Plugging in the numbers then produces the following:  
+$m = 7! / (7 - 2)! = 42$  
+using the standard $\alpha = 0.05$, the significance level $= 0.05 / 42 = 0.0012$
+
+$H_{0}$ will therefore be rejected if for a given model-to-model comparison t-test, the corresponding *p-value* is less than 0.0012. In that case, the data provides evidence that Model 1's error rate is actually lower than Model 2's (i.e. $H_{a}$ is true).
+
+```{r, echo=FALSE}
+rownames(modelingResults$ModelPerfAssessments) <- NULL
+panderOptions('table.alignment.default',"left")
+panderOptions('table.emphasize.rownames',FALSE)
+pander(modelingResults$ModelPerfAssessments[, -3], 
+       caption = "Table 2: Model pair-wise t-test comparisons")
+
+```
+
+&nbsp;
+
+#### Conclusions / Final Prediction Model Selection
+
+__From the data given above, we can conclude the following:__
+
+* *The data presented in this report provides evidence that the Random Forest (rf) model has a lower out-of-sample error rate than all other candidate models except for the Extreme Gradient Boosting Tree (xgbTree) model.* However the data also DOES NOT provide evidence that the Extreme Gradient Boosting model has a lower out-of-sample error rate either.
+
+* *The Random Forest (rf) model had a mean out-of-sample error rate of the 50 train \ cross validation runs of 0.005871, which was the lowest of any model created in this report. * It's complexity and training times are also significantly less than the next closest competing model (xgbTree).
+
+* *Given the above, the Random Forest (rf) model is selected as the FINAL PREDICTION MODEL for this report.*  It will be used to predict on the test set, with the results given in the following section of this report.
+
+
+*****
+
+
+## Prediction on the Test Set 
+
+Now run predictions on the test dataset using the Random Forest (rf) model trained above, and save the results to a file:
+
+```{r, echo=TRUE, warning=FALSE}
+
+# Run predictions using the rf model
+testPredictions <- predict(rfFit, newdata = wleTestData[, -ncol(wleTestData)])
+
+# Combine the problem IDs (last column) with the results and write to an output file
+predictionOutput <- data.frame(problem_id = wleTestData[, ncol(wleTestData)], 
+                               classe = factor(testPredictions))
+write.csv(predictionOutput, file = "wle-testpredictions.csv", row.names = FALSE)
+
+```
+
+
+
+
+
+
+
+
