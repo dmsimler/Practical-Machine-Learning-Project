@@ -1,7 +1,7 @@
 ---
 title: "Practical Machine Learning Course Project"
 author: "David Simler"
-date: "February 13, 2017"
+date: "February 12, 2017"
 output:
   html_document: default
   pdf_document: default
@@ -13,6 +13,9 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ## Synopsis
 
+Human activity recognition (HAR) research in recent years has focused on differentiating between distinct activities.  A variant of this has been to investigate how well an activity was being performed by a research participant.  As an example, data was collected on participants wearing sensors who were then told to perform a weight lifting exercise five different ways (classified as A, B, C, D, or E).  The first class corresponds to performing the exercise "the right way", and the other classes correspond to various types of mistakes that are commonly made.  This data was then packaged into the Weight Lifting Exercise (WLE) dataset and made publicly available for further analysis.  For further details, please refer to the project website [here](http://groupware.les.inf.puc-rio.br/har#weight_lifting_exercises).  
+
+The purpose of this report is to use the WLE dataset to build a classifier that predicts the manner in which a participant did an exercise.  It uses techniques and code from the Coursera "Practical Machine Learning" online course to pre-process and split the training data, train and cross-validate candidate models, and to compare and evaluate those models against each other.  For the sake of readability, not all of the code is displayed in this report's final output.  For those interested in reviewing the code in its entirety, please refer to the R Markdown source found [here](https://github.com/dmsimler/Practical-Machine-Learning-Project/blob/master/PMLCourseProject.Rmd).
 
 *****
 
@@ -54,7 +57,7 @@ library(gridExtra)
 &nbsp;
 
 #### 1. Read downloaded copies of the Weight Lifting Exercise (WLE) data into training and test data frames
-The WLE dataset train and test datasets were first manually downloaded to the project working directory from [here:](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv) and [here:](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv)
+The WLE dataset train and test datasets were first manually downloaded to the project working directory from [here](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv) and [here](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv)
 
 The code below then reads those csv files into respective data frames:
 ```{r, echo=TRUE, warning=FALSE}
@@ -247,6 +250,38 @@ modelTrainingControl <- trainControl(method = "repeatedcv", index = folds)
 
 ```
 
+For the folds created above, please note the following:
+
+* Each fold contains a set of indices which are the dataset rows to train the model in question.  The holdout set (used to estimate performance) is then the set of all the other rows in the dataset.
+
+* Each fold is randomly selected according to an internal sampling algorithm, and differs slightly from all the others (in content and sometimes in size).
+
+* Each fold and holdout set is stratified, i.e. contains roughly the same proportion of each target class as found in the overall training set from which they were created.
+
+Given below below is code sampling the folds to illustrate the above points:
+
+```{r, echo=TRUE, cache=FALSE, warning=FALSE, message=FALSE}
+
+# Show the length of each fold
+sapply(folds, length)
+
+# Show the indices in the first and last folds as an example
+folds[[1]][1:15]
+folds[[25]][1:15]
+
+# Show the class proportions in the overall training set 
+table(wleTrainingData$classe) / nrow(wleTrainingData)
+
+# Class proportions for fold 3 are stratified
+table(wleTrainingData[folds[[3]], ncol(wleTrainingData)]) / length(folds[[3]])
+
+# Class proportions for hold-out from fold 3 are stratified
+table(wleTrainingData[-folds[[3]], ncol(wleTrainingData)]) / (nrow(wleTrainingData) - length(folds[[3]]))
+
+```
+
+&nbsp;
+
 ##### *Train / Tune candidate models* 
 
 Taking from the primary classifier types presented in the course, the following candidate models will be created, trained, and cross-validated using the caret train method (which implements much of the process described above):
@@ -267,7 +302,7 @@ Taking from the primary classifier types presented in the course, the following 
 
 First the tree-based models are trained:
 
-```{r, echo=TRUE, cache=TRUE, warning=FALSE, message=FALSE}
+```{r TreeClassifiers, echo=TRUE, cache=TRUE, warning=FALSE, message=FALSE}
 
 set.seed(reportSeedToUse)
 rpartFit <- train(x = wleTrainingData[, -ncol(wleTrainingData)], y = wleTrainingData$classe,
@@ -300,7 +335,7 @@ xgboostFit <- train(x = wleTrainingData[, -ncol(wleTrainingData)], y = wleTraini
 
 Now build model-based classifiers:
 
-```{r, echo=TRUE, cache=TRUE, warning=FALSE, message=FALSE}
+```{r ModelBasedClassifiers, echo=TRUE, cache=TRUE, warning=FALSE, message=FALSE}
 
 set.seed(reportSeedToUse)
 naiveBayesFit <- train(x = wleTrainingData[, -ncol(wleTrainingData)], y = wleTrainingData$classe,
@@ -568,7 +603,7 @@ First, presented below are the results of the tuning and final models:
 ```{r, echo=FALSE, fig.align='center', results="asis"}
 
 panderOptions('table.alignment.default',"left")
-pander(modelingResults$FinalModelSummaries, caption = "Table 1: Out-of-sample errors and final model parameters for the candidate classification models created above.")
+pander(modelingResults$FinalModelSummaries, caption = "Table 1: Out-of-sample errors and final model parameters for the candidate classification models created above.  The lower the OOS Error, the more accurate is its classifier.")
 
 ```
 
@@ -576,7 +611,7 @@ pander(modelingResults$FinalModelSummaries, caption = "Table 1: Out-of-sample er
 Additionally to better visualize the estimated variance for each model, given below is a box plot of the out-of-sample error rates by model in decreasing order:
 
 
-```{r, echo=FALSE, fig.path="figures/", fig.align='center', fig.cap='Figure 2: Distribution of the out-of-sample errors across 50 folds for the different models', fig.height=5, fig.show='asis'}
+```{r, echo=FALSE, fig.path="figures/", fig.align='center', fig.cap='Figure 2: Distribution of the out-of-sample errors across 50 folds for the different models.  The lower (closer to zero) a distribution is, the more accurate is its classifier.', fig.height=5, fig.show='asis'}
 
 ggplot(modelingResults$ModelOOSErrors) + 
   geom_boxplot(notch=TRUE, fill="red", aes(x=Model, y=OOSError)) + 
@@ -678,17 +713,17 @@ pander(modelingResults$ModelPerfAssessments[, -3],
 
 __From the data given above, we can conclude the following:__
 
-* *The data presented in this report provides evidence that the Random Forest (rf) model has a lower out-of-sample error rate than all other candidate models except for the Extreme Gradient Boosting Tree (xgbTree) model.* However the data also DOES NOT provide evidence that the Extreme Gradient Boosting model has a lower out-of-sample error rate either.
+* *The data presented in this report provides evidence that the Random Forest (rf) model has a lower out-of-sample error rate than all other candidate models except for the Extreme Gradient Boosting Tree (xgbTree) model.* However the data DOES NOT provide evidence that the Extreme Gradient Boosting model has a lower out-of-sample error rate either.
 
 * *The Random Forest (rf) model had a mean out-of-sample error rate of the 50 train \ cross validation runs of 0.005871, which was the lowest of any model created in this report. * It's complexity and training times are also significantly less than the next closest competing model (xgbTree).
 
-* *Given the above, the Random Forest (rf) model is selected as the FINAL PREDICTION MODEL for this report.*  It will be used to predict on the test set, with the results given in the following section of this report.
+* *Given the above, the Random Forest (rf) model is selected as the FINAL PREDICTION MODEL for this report.*  It will be used to predict on the test set, with the code to do so in the following section of this report.
 
 
 *****
 
 
-## Prediction on the Test Set 
+## Predictions on the Test Set 
 
 Now run predictions on the test dataset using the Random Forest (rf) model trained above, and save the results to a file:
 
@@ -703,6 +738,9 @@ predictionOutput <- data.frame(problem_id = wleTestData[, ncol(wleTestData)],
 write.csv(predictionOutput, file = "wle-testpredictions.csv", row.names = FALSE)
 
 ```
+
+&nbsp;
+
 
 
 
