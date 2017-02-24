@@ -13,7 +13,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 Human activity recognition (HAR) research in recent years has focused on differentiating between distinct activities.  A variant of this has been to investigate how well an activity was being performed by a research participant.  As an example, data was collected on participants wearing sensors who were then told to perform a weight lifting exercise five different ways (classified as A, B, C, D, or E).  The first class corresponds to performing the exercise "the right way", and the other classes correspond to various types of mistakes that are commonly made.  This data was then packaged into the Weight Lifting Exercise (WLE) dataset and made publicly available for further analysis.  For further details, please refer to the project website [here](http://groupware.les.inf.puc-rio.br/har#weight_lifting_exercises).  
 
-The purpose of this report is to use the WLE dataset to build a classifier that predicts the manner in which a participant did an exercise.  It uses techniques and code from the Coursera "Practical Machine Learning" online course to pre-process and split the training data, train and cross-validate candidate models, and to compare and evaluate those models against each other.  For the sake of readability, not all of the code is displayed in this report's final output.  For those interested in reviewing the code in its entirety, please refer to the R Markdown source found [here](https://github.com/dmsimler/Practical-Machine-Learning-Project/blob/master/PMLCourseProject.Rmd).
+The purpose of this report is to use the WLE dataset to build a classifier that predicts the manner in which a participant did an exercise.  It uses techniques and code from the Coursera "Practical Machine Learning" online course to pre-process and split the training data, train and cross-validate candidate models, and to compare and evaluate those models against each other.  For the sake of readability, not all of the code is displayed in this report's final output.  For those interested in reviewing the code in its entirety, please refer to the R Markdown source found [here](https://github.com/dmsimler/Practical-Machine-Learning-Project/blob/master/PMLCourseProject%20Extended.Rmd).
 
 *****
 
@@ -300,6 +300,8 @@ Taking from the primary classifier types presented in the course, the following 
 * A naive bayes (nb) classifier
 
 * A linear disciminant analysis (lda) classifier
+
+* A multinomial (multiclass) logistic regression (multinom) classifier
 
 First the tree-based models are trained:
 
@@ -847,10 +849,10 @@ Additionally, shown below are heat maps of each model's predictions:
 
 ggplot(testPredictionDatasets$MeltedTestResults, aes(Classe, ObservationLabel)) + 
        geom_tile(aes(fill = Probability), colour = "white") + 
-       scale_fill_gradient(low = "white", high = "steelblue") +
+       scale_fill_gradient2(low = "white", high = "steelblue", guide = "legend") +
        theme_grey(base_size = 9) + 
        labs(x = "Classe Probability", y = "True Classe + Test Observation #") + 
-       facet_wrap(~ Model)
+       facet_wrap(~ Model, ncol = 2)
 
 ```
 
@@ -1051,7 +1053,7 @@ First, presented below are the results of the tuning and final scaled models:
 ```{r, echo=FALSE, fig.align='center', results="asis"}
 
 panderOptions('table.alignment.default',"left")
-pander(modelResultsPhase2$FinalModelSummaries, caption = "Table 3: Out-of-sample errors and final model parameters for the SCALED candidate classification models created for Phase 2.  The lower the OOS Error, the more accurate is its classifier.")
+pander(modelResultsPhase2$FinalModelSummaries, caption = "Table 4: Out-of-sample errors and final model parameters for the SCALED candidate classification models created for Phase 2.  The lower the OOS Error, the more accurate is its classifier.")
 
 ```
 
@@ -1059,7 +1061,7 @@ pander(modelResultsPhase2$FinalModelSummaries, caption = "Table 3: Out-of-sample
 Additionally to better visualize the estimated variance for each model, given below is a box plot of the out-of-sample error rates by model in decreasing order:
 
 
-```{r, echo=FALSE, fig.path="figures/", fig.align='center', fig.cap='Figure 4: Distribution of the out-of-sample errors across 50 folds for the different SCALED models.  The lower (closer to zero) a distribution is, the more accurate is its classifier.', fig.height=5, warning=FALSE}
+```{r, echo=FALSE, fig.path="figures/", fig.align='center', fig.cap='Figure 5: Distribution of the out-of-sample errors across 50 folds for the different SCALED models.  The lower (closer to zero) a distribution is, the more accurate is its classifier.', fig.height=5, warning=FALSE}
 
 ggplot(modelResultsPhase2$ModelOOSErrors) + 
   geom_boxplot(notch=TRUE, fill="red", aes(x=Model, y=OOSError)) + 
@@ -1073,7 +1075,7 @@ ggplot(modelResultsPhase2$ModelOOSErrors) +
 
 As in Phase 1, we first compare the scaled models with each other to see if there is any difference between them.  The boxplots of these differences are then shown below for each scaled model:
 
-```{r, echo=FALSE, fig.path="figures/", fig.align='center', fig.cap='Figure 3: Distribution of the difference between out-of-sample errors across 50 folds for the different model pairwise comparisons', fig.height=6, fig.show='asis', warning=FALSE}
+```{r, echo=FALSE, fig.path="figures/", fig.align='center', fig.cap='Figure 6: Distribution of the difference between out-of-sample errors across 50 folds for the different model pairwise comparisons', fig.height=6, fig.show='asis', warning=FALSE}
 
 # Make separate distinct plots for the differences between each model and all the others
 ggplot(modelResultsPhase2$PhasePerfComparisons) + 
@@ -1094,7 +1096,7 @@ rownames(modelResultsPhase2$PhasePerfAssessments) <- NULL
 panderOptions('table.alignment.default',"left")
 panderOptions('table.emphasize.rownames',FALSE)
 pander(modelResultsPhase2$PhasePerfAssessments[, -3], 
-       caption = "Table 4: Model pair-wise t-test comparisons")
+       caption = "Table 5: Pair-wise t-test comparisons for the same model types from Phase 1 to Phase 2")
 
 ```
 
@@ -1118,7 +1120,7 @@ Given below is a summary of the error rate of predictions run on the SCALED test
 ```{r, echo=FALSE, fig.align='center', results="asis"}
 
 panderOptions('table.alignment.default',"left")
-pander(scaledTestPredictionDatasets$ModelTestPerfSummary, caption = "Table 3: Error rate by model for predictions against a test dataset of 20 observations.")
+pander(scaledTestPredictionDatasets$ModelTestPerfSummary, caption = "Table 6: Error rate by model for predictions against a test dataset of 20 observations.")
 
 ```
 
@@ -1127,14 +1129,14 @@ pander(scaledTestPredictionDatasets$ModelTestPerfSummary, caption = "Table 3: Er
 
 Additionally, shown below are heat maps of each model's predictions:
 
-```{r, echo=FALSE, fig.path="figures/", fig.align='center', fig.cap='Figure 4: Heat map of predictions on the test set with five classes for each model type. The true classes are shown in the row labels while columns quantify the probabilities for each class (labeled A through E)', fig.height=10, fig.width=10, fig.show='asis', warning=FALSE}
+```{r, echo=FALSE, fig.path="figures/", fig.align='center', fig.cap='Figure 7: Heat map of predictions on the test set with five classes for each model type. The true classes are shown in the row labels while columns quantify the probabilities for each class (labeled A through E)', fig.height=10, fig.width=12, fig.show='asis', warning=FALSE}
 
 ggplot(scaledTestPredictionDatasets$MeltedTestResults, aes(Classe, ObservationLabel)) + 
        geom_tile(aes(fill = Probability), colour = "white") + 
-       scale_fill_gradient(low = "white", high = "steelblue") +
+       scale_fill_gradient2(low = "white", high = "steelblue", guide = "legend") +
        theme_grey(base_size = 9) + 
        labs(x = "Classe Probability", y = "True Classe + Test Observation #") + 
-       facet_wrap(~ Model)
+       facet_wrap(~ Model, ncol = 2)
 
 ```
 
