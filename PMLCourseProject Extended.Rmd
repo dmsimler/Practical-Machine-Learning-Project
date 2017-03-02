@@ -1,7 +1,7 @@
 ---
 title: "Human Activity Recognition - Analysis and Prediction for Weight Lifting Exercise Data"
 author: "David Simler"
-date: "February 27, 2017"
+date: "March 1, 2017"
 output: html_document
 ---
 
@@ -15,7 +15,7 @@ Human activity recognition (HAR) research in recent years has focused on differe
 
 The purpose of this report is to use the WLE dataset to build a classifier that predicts the manner in which a participant did an exercise.  It uses techniques and code from the Coursera "Practical Machine Learning" online course to pre-process and split the training data, train and cross-validate candidate models, and to compare and evaluate those models against each other.  For the sake of readability, not all of the code is displayed in this report's final output.  For those interested in reviewing the code in its entirety, please refer to the R Markdown source found [here](https://github.com/dmsimler/Practical-Machine-Learning-Project/blob/master/PMLCourseProject%20Extended.Rmd).  
 
-** Note: **  This is an extension of the original report whose focus is now more around demonstrates some techniques of feature engineering.  It now includes two phases:
+**Note:**  This is an extension of the original report whose focus is now more around demonstrates some techniques of feature engineering.  It now includes two phases:
 
 * Phase 1 - Removal of unnecessary predictors and creation of candidate ML classifiers.  Performance of these classifiers is then analyzed using cross-validation error (aka out-of-sample error) as the metric.
 
@@ -822,15 +822,39 @@ __From the data given above, we can conclude the following:__
 
 ```{r, echo=FALSE, warning=FALSE, results='hide'}
 
+# ------------------------------------------------------------------------------------------------------------
+MapClassToProbabilities <- function(predictedClassLabel, classLevels)
+{
+    classProbabilities <- data.frame(A = 0.0, B = 0.0, C = 0.0, D = 0.0, E = 0.0)
+    classProbabilities[1, which(classLevels == predictedClassLabel)] = 1.0
+    return(classProbabilities)
+} # end MapClassToProbabilities
+
+
+# ------------------------------------------------------------------------------------------------------------
 CreateTestPredictionResults <- function(model, testDataset, labels)
 {
-  # First get the predictions on the test dataset
-  classProbabilities <- predict(model, newdata = testDataset, type = "prob")
-  
   # Create the class levels that will be used below to determine the predicted class from the max. predicted
   # class probability for a given observation
   classeLevels <- gl(5, 1)
   levels(classeLevels) <- c("A", "B", "C", "D", "E")
+  
+  # First get the predictions on the test dataset
+  classProbabilities <- predict(model, newdata = testDataset, type = "prob")
+  
+  # Some models don't return probabilities, so for those, predict the class for each example and set the 
+  # predicted class's probability to 100% and everything else to 0.
+  # Note: The assumption is that if NA is returned for one probability in one example, it will be NA for all
+  # probabilities across all examples.
+  if (sum(is.na(classProbabilities)) > 0)
+  {
+    classPredictions <- predict(model, newdata = testDataset, type = "raw")
+    classProbabilities <- do.call(rbind, lapply(classPredictions,
+                                                function(predictedClass)
+                                                MapClassToProbabilities(predictedClass,
+                                                                        levels(classeLevels))))
+    
+  }  # end if
   
   # Build the dataset of prediction results
   obsIDs <- seq(1, nrow(testDataset))
@@ -894,6 +918,8 @@ CreateTestPredictionDatasets <- function(modelList, testDataset)
    meltedTestResults <- meltedTestResults[order(meltedTestResults$ObservationID, decreasing = TRUE), ]
    meltedTestResults$ObservationLabel <- factor(meltedTestResults$ObservationLabel, 
                                              levels = meltedTestResults$ObservationLabel)
+   # Kill the row names
+   rownames(meltedTestResults) <- NULL
    
    
    # Now return the results in a list
@@ -912,9 +938,10 @@ CreateTestPredictionDatasets <- function(modelList, testDataset)
 #       class probabilities, only raw class predictions.  The code will need to be modified to handle that 
 #       case and will be done so shortly.
 # -------------------------------------------------------------------------------------------------------
-testPredictionDatasets <- CreateTestPredictionDatasets(list(rfFit, xgboostFit, baggedTreeFit, gbmFit,
+testPredictionDatasets <- CreateTestPredictionDatasets(list(rfFit, xgboostFit, baggedTreeFit, gbmFit, 
                                                             naiveBayesFit, ldaFit, multinomialFit,
-                                                            rpartFit), wleTestData)
+                                                            rpartFit, svmFit), 
+                                                       wleTestData)
 
 ```
 
@@ -932,14 +959,15 @@ pander(testPredictionDatasets$ModelTestPerfSummary, caption = "Table 3: Error ra
 
 Additionally, shown below are heat maps of each model's predictions:
 
-```{r, echo=FALSE, fig.path="figures/", fig.align='center', fig.cap='Figure 4: Heat map of predictions on the test set with five classes for each model type. The true classes are shown in the row labels while columns quantify the probabilities for each class (labeled A through E)', fig.height=10, fig.width=10, fig.show='asis', warning=FALSE}
+```{r, echo=FALSE, fig.path="figures/", fig.align='center', fig.cap='Figure 4: Heat map of predictions on the test set with five classes for each model type. The true classes are shown in the row labels while columns quantify the probabilities for each class (labeled A through E)', fig.height=14, fig.width=14, fig.show='asis', warning=FALSE}
 
+# ggplot(subset(testPredictionDatasets$MeltedTestResults, Model != "svmRadial"), aes(Classe, ObservationLabel)) + 
 ggplot(testPredictionDatasets$MeltedTestResults, aes(Classe, ObservationLabel)) + 
        geom_tile(aes(fill = Probability), colour = "white") + 
        scale_fill_gradient2(low = "white", high = "steelblue", guide = "legend") +
        theme_grey(base_size = 9) + 
        labs(x = "Classe Probability", y = "True Classe + Test Observation #") + 
-       facet_wrap(~ Model, ncol = 2)
+       facet_wrap(~ Model)
 
 ```
 
@@ -1285,7 +1313,7 @@ __From the data given above, we can conclude the following:__
 scaledTestPredictionDatasets <- CreateTestPredictionDatasets(list(scaledRFFit, scaledXGBoostFit,
                                                                scaledBaggedTreeFit, scaledGBMFit, 
                                                                scaledNaiveBayesFit, scaledMultinomialFit,
-                                                               scaledLDAFit, scaledRpartFit),
+                                                               scaledLDAFit, scaledRpartFit, scaledSVMFit),
                                                              standardizedWLETestData)
 
 ```
@@ -1304,14 +1332,14 @@ pander(scaledTestPredictionDatasets$ModelTestPerfSummary, caption = "Table 6: Er
 
 Additionally, shown below are heat maps of each model's predictions:
 
-```{r, echo=FALSE, fig.path="figures/", fig.align='center', fig.cap='Figure 7: Heat map of predictions on the test set with five classes for each model type. The true classes are shown in the row labels while columns quantify the probabilities for each class (labeled A through E)', fig.height=10, fig.width=12, fig.show='asis', warning=FALSE}
+```{r, echo=FALSE, fig.path="figures/", fig.align='center', fig.cap='Figure 7: Heat map of predictions on the test set with five classes for each model type. The true classes are shown in the row labels while columns quantify the probabilities for each class (labeled A through E)', fig.height=14, fig.width=14, fig.show='asis', warning=FALSE}
 
 ggplot(scaledTestPredictionDatasets$MeltedTestResults, aes(Classe, ObservationLabel)) + 
        geom_tile(aes(fill = Probability), colour = "white") + 
        scale_fill_gradient2(low = "white", high = "steelblue", guide = "legend") +
        theme_grey(base_size = 9) + 
        labs(x = "Classe Probability", y = "True Classe + Test Observation #") + 
-       facet_wrap(~ Model, ncol = 2)
+       facet_wrap(~ Model)
 
 ```
 
