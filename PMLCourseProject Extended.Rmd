@@ -1,7 +1,8 @@
 ---
-title: "Human Activity Recognition - Analysis and Prediction for Weight Lifting Exercise Data"
+title: Feature Engineering Experimentation on Human Activity Recognition Weight Lifting
+  Exercise Data
 author: "David Simler"
-date: "March 1, 2017"
+date: "March 10, 2017"
 output: html_document
 ---
 
@@ -9,32 +10,9 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## Synopsis
-
-Human activity recognition (HAR) research in recent years has focused on differentiating between distinct activities.  A variant of this has been to investigate how well an activity was being performed by a research participant.  As an example, data was collected on participants wearing sensors who were then told to perform a weight lifting exercise five different ways (classified as A, B, C, D, or E).  The first class corresponds to performing the exercise "the right way", and the other classes correspond to various types of mistakes that are commonly made.  This data was then packaged into the Weight Lifting Exercise (WLE) dataset and made publicly available for further analysis.  For further details, please refer to the project website [here](http://groupware.les.inf.puc-rio.br/har#weight_lifting_exercises).  
-
-The purpose of this report is to use the WLE dataset to build a classifier that predicts the manner in which a participant did an exercise.  It uses techniques and code from the Coursera "Practical Machine Learning" online course to pre-process and split the training data, train and cross-validate candidate models, and to compare and evaluate those models against each other.  For the sake of readability, not all of the code is displayed in this report's final output.  For those interested in reviewing the code in its entirety, please refer to the R Markdown source found [here](https://github.com/dmsimler/Practical-Machine-Learning-Project/blob/master/PMLCourseProject%20Extended.Rmd).  
-
-**Note:**  This is an extension of the original report whose focus is now more around demonstrates some techniques of feature engineering.  It now includes two phases:
-
-* Phase 1 - Removal of unnecessary predictors and creation of candidate ML classifiers.  Performance of these classifiers is then analyzed using cross-validation error (aka out-of-sample error) as the metric.
-
-* Phase 2 - Scaling (standardization) of numeric predictors in the train/test sets.  Performance of these classifiers is again analyzed using cross-validation error as the metric.
-
-*****
-
-
-## Processing - Phase 1
-Weight Lifting Exercise data will be read in and processed below according to the following high-level steps:
-
-1. Read downloaded copies of the Weight Lifting Exercise (WLE) data into training and test data frames
-2. Remove unnecessary predictors from the WLE dataset
-3. Build candidate predication models 
-
-
 ```{r, echo=FALSE, warning=FALSE, results='hide', message=FALSE}
 
-# Include the R packages providing functionality used somewhere in this report.
+# Include the R packages providing functionality used throughout in this report.
 library(corrplot)
 library(rpart)
 library(ggplot2)
@@ -59,14 +37,52 @@ library(gridExtra)
 library(reshape2)
 library(kernlab)
 
+# Include all the functions called in this report to remove unnecessary predictors
+source('C:/DMS PC Backup/Coursera Courses/Practical Machine Learning/Project/PredictorRemovalFunctions.R')
+
+# Include all the functions called in this report to build datasets from classifier training/CV results
+source('C:/DMS PC Backup/Coursera Courses/Practical Machine Learning/Project/TrainCVResultDatasetFunctions.R')
+
+# Include all the functions called in this report to build datasets from classifier test set results
+source('C:/DMS PC Backup/Coursera Courses/Practical Machine Learning/Project/TestResultDatasetFunctions.R')
+
 ```
+
+## Synopsis
+
+Human activity recognition (HAR) research in recent years has focused on differentiating between distinct activities.  A variant of this has been to investigate how well an activity was being performed by a research participant.  As an example, data was collected on participants wearing sensors who were then told to perform a weight lifting exercise five different ways (classified as A, B, C, D, or E).  The first class corresponds to performing the exercise "the right way", and the other classes correspond to various types of mistakes that are commonly made.  This data was then packaged into the Weight Lifting Exercise (WLE) dataset and made publicly available for further analysis.  For further details, please refer to the project website [here](http://groupware.les.inf.puc-rio.br/har#weight_lifting_exercises).  
+
+The purpose of this report is to use the WLE dataset to build a classifier that predicts the manner in which a participant did an exercise.  It leverages functionality provided by the R caret package to pre-process and split the training data, train and cross-validate candidate models, and to compare and evaluate those models against each other.  For the sake of readability, not all of the code is displayed in this report's final output.  For those interested in reviewing the code in its entirety, please refer to the R Markdown source found [here](https://github.com/dmsimler/Practical-Machine-Learning-Project/blob/master/PMLCourseProject%20Extended.Rmd).  
+
+**Note:**  This is an extension of a report originally completed for the Coursera Practical Machine Learning course, now repurposing the analysis to investigate and demonstrate some techniques of feature engineering.  It now includes three phases:
+
+* Phase 0 - Handle the missing values in the WLE train/test datasets just enough to create candidate ML models.  These models will create a performance baseline (in terms of cross-validation error rate) that will be used to compare with models in subsequent phases.
+
+* Phase 1 - Removal of correlated predictors from the WLE train/test datasets, train the same set of candidate models with this dataset, and then compare their performance with those from the baseline of Phase 0. 
+
+* Phase 2 - Scale (standardize) the numeric predictors in the WLE train/test datasets and build new candidate models.  Performance of these classifiers is again compared to those in the baseline of Phase 0.
+
+*****
+
+
+## Processing - Phase 0
+Weight Lifting Exercise data will be read in and processed below according to the following high-level steps:
+
+1. Read downloaded copies of the Weight Lifting Exercise (WLE) data into training and test data frames  
+
+2. Handle missing values in the training dataset enough to build models  
+
+3. Build candidate predication models 
+
 
 &nbsp;
 
-#### 1. Read downloaded copies of the Weight Lifting Exercise (WLE) data into training and test data frames
+#### 1. Read downloaded copies of the Weight Lifting Exercise (WLE) data into training and test data frames  
+
 The WLE dataset train and test datasets were first manually downloaded to the project working directory from [here](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv) and [here](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv)
 
-The code below then reads those csv files into respective data frames:
+The code below then reads those csv files into respective data frames:  
+
 ```{r, echo=TRUE, warning=FALSE, cache=FALSE}
 
 # Set the current working directory to where there data file will be
@@ -103,88 +119,15 @@ wleTestData$classe <- as.factor(wleTestData$classe)
 
 &nbsp;
 
-#### 2. Remove unnecessary predictors from the WLE datasets
+#### 2. Handle missing values in the training dataset enough to build models
 
-```{r, echo=FALSE, results='hide'}
+There are a few predictor types and issues in the WLE dataset that prevent creating models straight away out-of-the-base.  Those predictors/issues fall into one or more of the following categories:
 
-# ---------------------------------------------------------------------------------------------------
-# Functions used to identify the various predictors that won't provide much predictive value and 
-# could be removed from the training dataset.
-# ---------------------------------------------------------------------------------------------------
+* IDs or timestamps that provide no generic predictive value
 
-# ---------------------------------------------------------------------------------------------------
-# Function to identifiy predictors whose values show very little variance and thus have very little
-# predictive value.
-# See pages 43-45 in Applied Predictive Analytics for additional details.
-# ---------------------------------------------------------------------------------------------------
-FindNearZeroVarPredictors <- function(trainingData, targetColIndex)
-{
-  zeroVarVarsToRemove <- nearZeroVar(trainingData[, -targetColIndex])
-  return(zeroVarVarsToRemove)
-} # end FindNearZeroVarPredictors
+* Columns that have missing values
 
-
-# ---------------------------------------------------------------------------------------------------
-# Function to find predictors that could be removed are highly coorelated with each other.  
-# See pages 45-47 in Applied Predictive Analytics for additional details.
-# ---------------------------------------------------------------------------------------------------
-FindRemovableCorrelatedPredictors <- function(trainingData, targetColIndex, correlationThreshold)
-{
-  correlations <- cor(trainingData[, -targetColIndex], use = "na.or.complete")
-  correlatedVarsToRemove <- findCorrelation(correlations, cutoff = correlationThreshold)
-  
-  return (correlatedVarsToRemove)
-} # end FindRemovableCorrelatedPredictors
-
-
-# ---------------------------------------------------------------------------------------------------
-# Function that calculates the percentage of rows with missing data per column per class (A, B, C, etc.) 
-# ---------------------------------------------------------------------------------------------------
-FindColsWithMostlyNAPerClass <- function(trainingData, targetColIndex, naPctThreshold)
-{
-  # Initialize a dataframe to hold the calculated percentages of missing values by column and class
-  targetClasses <- unique(trainingData[, targetColIndex])
-  naPctPerColPerClass <- data.frame(classe = targetClasses)
-  
-  for(colName in colnames(trainingData[, -targetColIndex])) 
-    naPctPerColPerClass <- cbind(naPctPerColPerClass, rep(0.0, length(targetClasses)))
-  
-  colnames(naPctPerColPerClass)[2:ncol(trainingData)] <- colnames(trainingData[, -targetColIndex])
-  
-  # Now calculate the actual percentage of missing values for each column for the rows belonging to a
-  # given target class
-  for (currentClass in targetClasses)
-  {
-    # Grab the rows that belong to the current class being processed
-    classRows <- trainingData[, targetColIndex] == currentClass
-    classDataSubset <- trainingData[classRows, ]
-    numSamplesInClass <- nrow(classDataSubset)
-    
-    # Find the rows for the current class being processed
-    naMappingRowIndex <- which(naPctPerColPerClass$classe == currentClass)
-    
-    for (currentColIndex in 2:ncol(naPctPerColPerClass))
-    {
-      # Calculate the percentage of samples in this class that have an NA for this column
-      naPctPerColPerClass[naMappingRowIndex, currentColIndex] <- 
-        sum(is.na(classDataSubset[, currentColIndex - 1])) / numSamplesInClass
-    } # end for
-  } # end for
-
-  # Return the NA pct per col per class
-  colsWithMostlyNA <- which(colMeans(naPctPerColPerClass[, -1]) > naPctThreshold)
-    
-  return (colsWithMostlyNA)
-} # end FindColsWithMostlyNAPerClass
-
-```
-
-There are a large number of predictors in the WLE dataset that provide no real predictive value and could adversely affect the performance of certain types of models.  Those predictors will fall into one or more of the following categories and will need to be removed from the training dataset:
-
-* IDs or timestamps
-* Columns that have an average percentage of missing values per class above a certain threshold
-* Columns with little or no variance
-* Columns whose removal will reduce the number of pair-wise correlations
+For the second issue, where the WLE training dataset has columns with missing values, the issue is so prevelant that the "missingness" becomes relatively meaningless (i.e. it's not predictive) and attempts at imputation of some sort of meaningful default values (i.e. using caret functionality such as k-nearest-neighbor, bagged trees, or medians) were found to be useless for certain types of models (e.g. LDA).  These columns were checked for missing values by class membership (i.e. A-E) for each observation, and were discarded if the average number of missing values across all classes exceeded 95%.
 
 Given below is a code snippet that removes these types of columns from the WLE training and test datsets:   
 **NOTE:** Actual code of the functions referenced below not shown. Please refer to this report's GitHub repository if those details are required.
@@ -198,21 +141,11 @@ colsWithTimestampsOrIDs <- c(1:7)
 wleTrainingData <- wleTrainingData[, -colsWithTimestampsOrIDs]
 wleTestData <- wleTestData[, -colsWithTimestampsOrIDs]
 
-# Next remove those remaining columns that have near zero variance
-colsWithNearZeroVar <- FindNearZeroVarPredictors(wleTrainingData, ncol(wleTrainingData))
-wleTrainingData <- wleTrainingData[, -colsWithNearZeroVar]
-wleTestData <- wleTestData[, -colsWithNearZeroVar]
-
 # Now remove those columns from the dataset have an average percentage of missing values per class
 # above 95% 
 colsWithMostlyNA <- FindColsWithMostlyNAPerClass(wleTrainingData, ncol(wleTrainingData), 0.95)
 wleTrainingData <- wleTrainingData[, -colsWithMostlyNA]
 wleTestData <- wleTestData[, -colsWithMostlyNA]
-
-# Finally remove those columns that will reduce pair-wise correlations
-colsToReduceCorrelations <- FindRemovableCorrelatedPredictors(wleTrainingData, ncol(wleTrainingData), 0.8)
-wleTrainingData <- wleTrainingData[, -colsToReduceCorrelations]
-wleTestData <- wleTestData[, -colsToReduceCorrelations]
 
 ```
 
@@ -221,8 +154,7 @@ Given below is a final tally of the number of columns removed and those that sti
 ```{r, echo=TRUE}
 
 # Print the count of columns removed and the number that are left
-numColsRemoved <- length(colsWithTimestampsOrIDs) + length(colsWithNearZeroVar) + 
-                  length(colsWithMostlyNA) + length(colsToReduceCorrelations)
+numColsRemoved <- length(colsWithTimestampsOrIDs) + length(colsWithMostlyNA)
 print(sprintf("Number of columns removed = %d, Number of columns remaining in the training set = %d", 
               numColsRemoved, ncol(wleTrainingData)))
 
@@ -233,7 +165,7 @@ colnames(wleTrainingData)
 
 &nbsp;
 
-#### 3. Build candidate predication models
+#### 3. Build baseline candidate classifiers
 
 
 ##### *Process Overview* 
@@ -299,17 +231,15 @@ table(wleTrainingData[-folds[[3]], ncol(wleTrainingData)]) / (nrow(wleTrainingDa
 
 &nbsp;
 
-##### *Train / Tune candidate models* 
+##### *Train / Tune candidate classifiers* 
 
-Taking from the primary classifier types presented in the course, the following candidate models will be created, trained, and cross-validated using the caret train method (which implements much of the process described above):
+The following candidate models will be created, trained, and cross-validated using the caret train method (which implements much of the process described above):
 
 * A single decision tree (rpart)
 
 * A bagged set of decision trees (treebag)
 
 * A random forest (rf) - usually the best out-of-the-box classifier
-
-* A stochastic gradient boosting tree (gbm) - used in the course
 
 * An extreme boosted gradient decision tree model (xgbTree) - often a winner in Kaggle competitions
 
@@ -323,49 +253,43 @@ Taking from the primary classifier types presented in the course, the following 
 
 First the tree-based models are trained:
 
-```{r TreeClassifiers, echo=TRUE, cache=TRUE, warning=FALSE, message=FALSE}
+```{r Phase0TreeClassifiers, echo=TRUE, cache=TRUE, warning=FALSE, message=FALSE}
 
 set.seed(reportSeedToUse)
-rpartFit <- train(x = wleTrainingData[, -ncol(wleTrainingData)], y = wleTrainingData$classe,
+phase0RpartFit <- train(x = wleTrainingData[, -ncol(wleTrainingData)], y = wleTrainingData$classe,
                   method = "rpart", 
                   trControl = modelTrainingControl)
 
 set.seed(reportSeedToUse)
-baggedTreeFit <- train(x = wleTrainingData[, -ncol(wleTrainingData)], y = wleTrainingData$classe,
+phase0BaggedTreeFit <- train(x = wleTrainingData[, -ncol(wleTrainingData)], y = wleTrainingData$classe,
                        method = "treebag", 
                        trControl = modelTrainingControl)
 
 set.seed(reportSeedToUse)
-rfFit <- train(x = wleTrainingData[, -ncol(wleTrainingData)], y = wleTrainingData$classe,
+phase0RFFit <- train(x = wleTrainingData[, -ncol(wleTrainingData)], y = wleTrainingData$classe,
                method = "rf", 
                trControl = modelTrainingControl)
 
 set.seed(reportSeedToUse)
-gbmFit <- train(x = wleTrainingData[, -ncol(wleTrainingData)], y = wleTrainingData$classe,
-                method = "gbm", 
-                trControl = modelTrainingControl,
-                verbose = FALSE)
-
-set.seed(reportSeedToUse)
-xgboostFit <- train(x = wleTrainingData[, -ncol(wleTrainingData)], y = wleTrainingData$classe,
+phase0XGBoostFit <- train(x = wleTrainingData[, -ncol(wleTrainingData)], y = wleTrainingData$classe,
                     method = "xgbTree", 
                     trControl = modelTrainingControl,
                     verbose = FALSE)
 
 ```
 
-Now build linear classifiers:
+Now build some linear classifiers:
 
-```{r LinearClassifiers, echo=TRUE, cache=TRUE, warning=FALSE, message=FALSE, results='hide'}
+```{r Phase0LinearClassifiers, echo=TRUE, cache=TRUE, warning=FALSE, message=FALSE, results='hide'}
 
 set.seed(reportSeedToUse)
-multinomialFit <- train(x = wleTrainingData[, -ncol(wleTrainingData)], y = wleTrainingData$classe,
+phase0MultinomialFit <- train(x = wleTrainingData[, -ncol(wleTrainingData)], y = wleTrainingData$classe,
                         method = "multinom", 
                         trControl = modelTrainingControl,
                         verbose = FALSE)
 
 set.seed(reportSeedToUse)
-ldaFit <- train(x = wleTrainingData[, -ncol(wleTrainingData)], y = wleTrainingData$classe,
+phase0LDAFit <- train(x = wleTrainingData[, -ncol(wleTrainingData)], y = wleTrainingData$classe,
                        method = "lda", 
                        trControl = modelTrainingControl)
 
@@ -373,15 +297,15 @@ ldaFit <- train(x = wleTrainingData[, -ncol(wleTrainingData)], y = wleTrainingDa
 
 Finally, build other miscellaneous non-linear classifiers of interest:
 
-```{r MiscClassifiers, echo=TRUE, cache=TRUE, warning=FALSE, message=FALSE}
+```{r Phase0MiscClassifiers, echo=TRUE, cache=TRUE, warning=FALSE, message=FALSE}
 
 set.seed(reportSeedToUse)
-naiveBayesFit <- train(x = wleTrainingData[, -ncol(wleTrainingData)], y = wleTrainingData$classe,
+phase0NaiveBayesFit <- train(x = wleTrainingData[, -ncol(wleTrainingData)], y = wleTrainingData$classe,
                        method = "nb", 
                        trControl = modelTrainingControl)
 
 set.seed(reportSeedToUse)
-svmFit <- train(x = wleTrainingData[, -ncol(wleTrainingData)], y = wleTrainingData$classe,
+phase0SVMFit <- train(x = wleTrainingData[, -ncol(wleTrainingData)], y = wleTrainingData$classe,
                 method = "svmRadial", 
                 trControl = modelTrainingControl)
 
@@ -394,286 +318,382 @@ svmFit <- train(x = wleTrainingData[, -ncol(wleTrainingData)], y = wleTrainingDa
 ```{r, echo=FALSE, results='hide'}
 
 # ---------------------------------------------------------------------------------------------------
-# This section provides functions that create datasets from the results of the model 
-# training/tuning/cross-validation performed above.  These datasets will be used for analysis and 
-# visualizations performed later in this document (both for Phase 1 and Phase 2) 
+# Make a call to create the datasets with the results of training the candidate classifiers created 
+# in Phase 0.  These datasets will be used for the visualizations and analysis that follow below.
 # ---------------------------------------------------------------------------------------------------
 
+# Define the levels for the comparisons between models created in Phase 0
+ModelComparisonOrderedLevelsPhase0 <- c("xgbTree - rf", "xgbTree - treebag",  
+                                        "xgbTree - svmRadial", "xgbTree - nb", "xgbTree - lda", 
+                                        "xgbTree - multinom", "xgbTree - rpart", 
+                                        "rf - xgbTree", "rf - treebag", 
+                                        "rf - svmRadial", "rf - nb", "rf - lda", "rf - multinom", "rf - rpart", 
+                                        "treebag - xgbTree", "treebag - rf", "treebag - svmRadial",
+                                        "treebag - nb", "treebag - lda", "treebag - multinom", "treebag - rpart",
+                                        "svmRadial - xgbTree", "svmRadial - rf", "svmRadial - treebag",
+                                        "svmRadial - nb", "svmRadial - lda", 
+                                        "svmRadial - multinom", "svmRadial - rpart",
+                                        "nb - xgbTree", "nb - rf", "nb - treebag", 
+                                        "nb - svmRadial", "nb - lda", "nb - multinom", "nb - rpart",
+                                        "lda - xgbTree", "lda - rf", "lda - treebag", 
+                                        "lda - svmRadial", "lda - nb", "lda - multinom", "lda - rpart", 
+                                        "multinom - xgbTree", "multinom - rf", "multinom - treebag",
+                                        "multinom - gbm", "multinom - svmRadial", "multinom - nb", 
+                                        "multinom - lda", "multinom - rpart",
+                                        "rpart - xgbTree", "rpart - rf", "rpart - treebag", 
+                                        "rpart - svmRadial", "rpart - nb",  "rpart - lda", 
+                                        "rpart - multinom")
+
+# Now build the list of datasets bringing together all the modeling results for Phase 0
+modelResultsPhase0 <- CreateModelPerfResultsDatasetsWWithinPhaseComparison(list(phase0RFFit, phase0XGBoostFit,
+                                                                                phase0BaggedTreeFit,
+                                                                                phase0NaiveBayesFit, 
+                                                                                phase0LDAFit,
+                                                                                phase0MultinomialFit,
+                                                                                phase0RpartFit, phase0SVMFit),
+                                                                           ModelComparisonOrderedLevelsPhase0)
+ 
+
+```
+
+*****
+
+
+## Findings - Phase 0
+
+#### Model Training / Tuning Results
+
+First, presented below are the results of the tuning and final models:
+
+```{r, echo=FALSE, fig.align='center', results="asis"}
+
+panderOptions('table.alignment.default',"left")
+pander(modelResultsPhase0$FinalModelSummaries, caption = "Table 1: Cross-validation errors and final model parameters for the candidate classification models created above.  The lower the cross-validation error, the more accurate is its classifier.")
+
+```
+
+
+Additionally to better visualize the estimated variance for each model, given below is a box plot of the cross-validation error rates by model in decreasing order:
+
+
+```{r, echo=FALSE, fig.path="figures/", fig.align='center', fig.cap='Figure 2: Distribution of the cross-validation errors across 50 folds for the different models.  The lower (closer to zero) a distribution is, the more accurate is its classifier.', fig.height=5, fig.show='asis'}
+
+ggplot(modelResultsPhase0$ModelCVErrors) + 
+  geom_boxplot(notch=FALSE, fill="red", aes(x=Model, y=CVError)) + 
+  xlab("Model Type") + ylab("CV Error")
+
+```
+
+#### Statistical Comparison of Models - Overview
+
+In order to understand which models are truly the best for the WLE data, it is necessary to calculate the difference in the cross-validation (i.e. out-of-sample) errors doing pair-wise model comparisons, and then running t-tests on those pair-wise differences to determine statistical significance.
+
+In the first step, the difference in cross-validation error between each two models (model 1 and model 2), within a set of comparisons, is calculated according to the following formula:
+
+$CV Error Difference = CVError_{model1} - CVError_{model2}$;
+
+A visualization in the form of a box plot is then usually provided to give the reader a sense of how the error rate varies between the models being compared.
+
+In the second step, a t-test is performed on each model comparison's mean difference in CV error according to the following hypotheses:
+
+$H_{0}: \mu_{CVError, model1} - \mu_{CVError, model2} = 0$;   
+
+$H_{a}: \mu_{CVError, model1} - \mu_{CVError, model2} < 0$
+
+For the above, the significance level $\alpha$ will need to be adjusted lower to $\alpha / m$ (i.e. the *Bonferroni correction*) in order to reject $H_{0}$ as the chance of a rare event increases with multiple comparisons, and therefore, the likelihood of incorrectly rejecting $H_{0}$ increases. Here **m** = total number of comparisons, and will vary depending upon the type of comparisons being done.  For the purposes of this experiment, please note the following:
+
+* Comparisons will be done both between different models of the same phase (i.e. random forest vs. boosted trees, etc.) and between the same models from two different phases (i.e. random forest from phase 0 vs. random forest from phase 1).  
+
+* For a given model comparison, there will actually be two t-tests performed: one for the case where model 1 CV error < model 2 CV error, and the other for model 2 CV error < model 1 CV error.  This is to determine which model statistically really has the lower error rate.  This is equivalent to separately answering the two questions: 1) Is this model better than that one?, and 2) Is it worse?  
+
+
+&nbsp;
+
+
+##### *Statistical Comparison of Baseline Models from Phase 0 (i.e. within phase comparisons)*
+
+As described above, the boxplots of CV differences are shown below for each model comparison (grouped by a given model comparing it to all the other models trained in Phase 0):
+
+```{r, echo=FALSE, fig.path="figures/", fig.align='center', fig.cap='Figure 3: Distribution of the difference between cross-validation errors across 50 folds for the different model pairwise comparisons', fig.height=10, fig.show='asis'}
+
+# Make separate distinct plots for the differences between each model and all the others
+rfCompPlot <- ggplot(subset(modelResultsPhase0$ModelPerfComparisons, Model1 == "rf")) + 
+                     geom_boxplot(notch=FALSE, fill="red", aes(x=DiffName, y=OOSErrorDiff)) + 
+                     coord_flip() + 
+                     xlab("Model Pairwise Comparison") + ylab("CV Error Difference") + 
+                     ggtitle("rf Comparisons")
+
+xgbCompPlot <- ggplot(subset(modelResultsPhase0$ModelPerfComparisons, Model1 == "xgbTree")) + 
+                      geom_boxplot(notch=FALSE, fill="red", aes(x=DiffName, y=OOSErrorDiff)) + 
+                      coord_flip() + 
+                      xlab("Model Pairwise Comparison") + ylab("CV Error Difference") +
+                      ggtitle("xgbTree Comparisons")
+
+bagCompPlot <- ggplot(subset(modelResultsPhase0$ModelPerfComparisons, Model1 == "treebag")) + 
+                      geom_boxplot(notch=FALSE, fill="red", aes(x=DiffName, y=OOSErrorDiff)) + 
+                      coord_flip() + 
+                      xlab("Model Pairwise Comparison") + ylab("CV Error Difference") +
+                      ggtitle("treebag comparisons")
+
+svmCompPlot <- ggplot(subset(modelResultsPhase0$ModelPerfComparisons, Model1 == "svmRadial")) + 
+                      geom_boxplot(notch=FALSE, fill="red", aes(x=DiffName, y=OOSErrorDiff)) + 
+                      coord_flip() + 
+                      xlab("Model Pairwise Comparison") + ylab("CV Error Difference") +
+                      ggtitle("svm Comparisons")
+
+nbCompPlot <- ggplot(subset(modelResultsPhase0$ModelPerfComparisons, Model1 == "nb")) + 
+                     geom_boxplot(notch=FALSE, fill="red", aes(x=DiffName, y=OOSErrorDiff)) + 
+                     coord_flip() + 
+                     xlab("Model Pairwise Comparison") + ylab("CV Error Difference") +
+                     ggtitle("nb Comparisons")
+  
+  
+ldaCompPlot <- ggplot(subset(modelResultsPhase0$ModelPerfComparisons, Model1 == "lda")) + 
+                      geom_boxplot(notch=FALSE, fill="red", aes(x=DiffName, y=OOSErrorDiff)) + 
+                      coord_flip() + 
+                      xlab("Model Pairwise Comparison") + ylab("CV Error Difference") +
+                      ggtitle("lda Comparisons")
+
+multinomCompPlot <- ggplot(subset(modelResultsPhase0$ModelPerfComparisons, Model1 == "multinom")) + 
+                           geom_boxplot(notch=FALSE, fill="red", aes(x=DiffName, y=OOSErrorDiff)) + 
+                           coord_flip() + 
+                           xlab("Model Pairwise Comparison") + ylab("CV Error Difference") +
+                           ggtitle("multinom Comparisons")
+
+rpartCompPlot <- ggplot(subset(modelResultsPhase0$ModelPerfComparisons, Model1 == "rpart")) + 
+                        geom_boxplot(notch=FALSE, fill="red", aes(x=DiffName, y=OOSErrorDiff)) + 
+                        coord_flip() + 
+                        xlab("Model Pairwise Comparison") + ylab("CV Error Difference") +
+                        ggtitle("rpart Comparisons")
+  
+# Now arrange all the plots in the order of best to work model (in terms of CV Error)  
+grid.arrange(rfCompPlot, xgbCompPlot, bagCompPlot, svmCompPlot, nbCompPlot, 
+             ldaCompPlot, multinomCompPlot, rpartCompPlot,
+             nrow = 4, ncol = 2)
+
+```
+
+&nbsp;
+
+Now, perform a t-test on each model comparison's mean difference in CV error using the *Bonferroni correction*  $\alpha / m$. Here $m = n! / (n - k)!$, where **m** = total number of comparisons, **n** = number of models, and **k** = number of models in a single comparison. Plugging in the numbers then produces the following:  
+$m = 8! / (8 - 2)! = 56$  
+using the standard $\alpha = 0.05$, the significance level $= 0.05 / 56 = 0.00089$
+
+$H_{0}$ will therefore be rejected if for a given model-to-model comparison t-test, the corresponding *p-value* is less than 0.00089. In that case, the data provides convincing evidence that Model 1's error rate is actually lower than Model 2's (i.e. $H_{a}$ is true).
+
+```{r, echo=FALSE}
+
+rownames(modelResultsPhase0$ModelPerfAssessments) <- NULL
+panderOptions('table.alignment.default',"left")
+panderOptions('table.emphasize.rownames',FALSE)
+pander(modelResultsPhase0$ModelPerfAssessments[, -3], 
+       caption = "Table 2: Phase 0 model pair-wise t-test comparisons")
+
+```
+
+
+&nbsp;
+
+
+#### Predictions on the Test Set
+
+```{r, echo=FALSE, warning=FALSE, results='hide'}
+
+# -------------------------------------------------------------------------------------------------------
+# Create predictions on the test data by the various candidate models from Phase 0 and  
+# additional datasets needed for analysis and visualization below.
+# -------------------------------------------------------------------------------------------------------
+phase0TestPredictionDatasets <- CreateTestPredictionDatasets(list(phase0XGBoostFit,
+                                                                  phase0RFFit, 
+                                                                  phase0BaggedTreeFit, 
+                                                                  phase0SVMFit, 
+                                                                  phase0NaiveBayesFit, 
+                                                                  phase0LDAFit,
+                                                                  phase0MultinomialFit, 
+                                                                  phase0RpartFit), 
+                                                             wleTestData, 
+                                                             0)
+
+```
+
+Given below is a summary of the error rate of predictions run on the test dataset:
+
+```{r, echo=FALSE, fig.align='center', results="asis"}
+
+panderOptions('table.alignment.default',"left")
+pander(phase0TestPredictionDatasets$ModelTestPerfSummary, caption = "Table 3: Error rate by model for predictions against a test dataset of 20 observations.")
+
+```
+
+&nbsp;
+
+Additionally, shown below are heat maps of each model's predictions:
+
+```{r, echo=FALSE, fig.path="figures/", fig.align='center', fig.cap='Figure 4: Heat map of predictions on the test set with five classes for each model type. The true classes are shown in the row labels while columns quantify the probabilities for each class (labeled A through E)', fig.height=14, fig.width=14, fig.show='asis', warning=FALSE}
+
+# ggplot(subset(phase0TestPredictionDatasets$MeltedTestResults, Model != "svmRadial"), aes(Classe, ObservationLabel)) + 
+ggplot(phase0TestPredictionDatasets$MeltedTestResults, aes(Classe, ObservationLabel)) + 
+       geom_tile(aes(fill = Probability), colour = "white") + 
+       scale_fill_gradient2(low = "white", high = "steelblue", guide = "legend") +
+       theme_grey(base_size = 9) + 
+       labs(x = "Classe Probability", y = "True Classe + Test Observation #") + 
+       facet_wrap(~ Model)
+
+```
+
+
+&nbsp;
+
+
+#### Conclusions 
+
+__From the data given above, we can conclude the following:__
+
+* *The data presented in this report provides evidence that the Extreme Gradient Boosting Tree (xgbTree) classifier has a lower CV error rate than all other candidate classifiers except for the Random Forest (rf) classifier.* However the data DOES NOT provide evidence that the Random Forest model has a lower CV error rate either.
+
+* *The Gradient Boosted Trees and Random Forest classifiers also generalized very well to the small test set with 0 error. However, the Bagged Trees and SVM Radial classifiers that performed well on cross-validation but not the best, also generalized very well with 0 error on the test set. * 
+
+
+*****
+
+
+## Processing - Phase 1
+
+Building upon the analysis performed above, WLE train/test will processed below according to the following high-level steps:
+
+1. Reduce the number of correlated predictors in the train/test datasets  
+
+2. Build candidate predication models with the modified training set
+
+
+#### 1. Reduce the number of correlated predictors in the train/test datasets
+
+If two predictors are correlated, this implies that they measure the same underlying information.  The assumption therefore goes that removing one of them will create simpler and more interpretable models. Given below is a code snippet that removes these pair-wise correlations from the WLE training and test datsets:   
+
+**NOTE:** Actual code of the functions referenced below not shown. Please refer to this report's GitHub repository if those details are required.
+
+
+```{r, echo=TRUE, cache=FALSE}
+
+# Remove those columns that will reduce pair-wise correlations
+colsToReduceCorrelations <- FindRemovableCorrelatedPredictors(wleTrainingData, ncol(wleTrainingData), 0.8)
+reducedCorrTrainingData <- wleTrainingData[, -colsToReduceCorrelations]
+reducedCorrTestData <- wleTestData[, -colsToReduceCorrelations]
+
+```
+
+
+&nbsp;
+
+
+##### 2. Build candidate predication models with the modified training set
+
+All the classifiers built in Phase 0 are now built again in this phase; the only difference being the training dataset has some of the pairwise correlated predictors removed.  Given below is the code to create those classifiers in the same groupings as above.
+
+
+First the tree-based models are trained:
+
+```{r Phase1TreeClassifiers, echo=TRUE, cache=TRUE, warning=FALSE, message=FALSE}
+
+set.seed(reportSeedToUse)
+phase1RpartFit <- train(x = reducedCorrTrainingData[, -ncol(reducedCorrTrainingData)], 
+                        y = reducedCorrTrainingData$classe,
+                        method = "rpart", 
+                        trControl = modelTrainingControl)
+
+set.seed(reportSeedToUse)
+phase1BaggedTreeFit <- train(x = reducedCorrTrainingData[, -ncol(reducedCorrTrainingData)], 
+                             y = reducedCorrTrainingData$classe, 
+                             method = "treebag", 
+                             trControl = modelTrainingControl)
+
+set.seed(reportSeedToUse)
+phase1RFFit <- train(x = reducedCorrTrainingData[, -ncol(reducedCorrTrainingData)], 
+                     y = reducedCorrTrainingData$classe,
+                     method = "rf", 
+                     trControl = modelTrainingControl)
+
+set.seed(reportSeedToUse)
+phase1XGBoostFit <- train(x = reducedCorrTrainingData[, -ncol(reducedCorrTrainingData)], 
+                          y = reducedCorrTrainingData$classe,
+                          method = "xgbTree", 
+                          trControl = modelTrainingControl,
+                          verbose = FALSE)
+
+```
+
+Now build the linear classifiers:
+
+```{r Phase1LinearClassifiers, echo=TRUE, cache=TRUE, warning=FALSE, message=FALSE, results='hide'}
+
+set.seed(reportSeedToUse)
+phase1MultinomialFit <- train(x = reducedCorrTrainingData[, -ncol(reducedCorrTrainingData)], 
+                              y = reducedCorrTrainingData$classe,
+                              method = "multinom", 
+                              trControl = modelTrainingControl,
+                              verbose = FALSE)
+
+set.seed(reportSeedToUse)
+phase1LDAFit <- train(x = reducedCorrTrainingData[, -ncol(reducedCorrTrainingData)], 
+                      y = reducedCorrTrainingData$classe,
+                      method = "lda", 
+                      trControl = modelTrainingControl)
+
+```
+
+Finally, build other miscellaneous non-linear classifiers of interest:
+
+```{r Phase1MiscClassifiers, echo=TRUE, cache=TRUE, warning=FALSE, message=FALSE}
+
+set.seed(reportSeedToUse)
+phase1NaiveBayesFit <- train(x = reducedCorrTrainingData[, -ncol(reducedCorrTrainingData)], 
+                             y = reducedCorrTrainingData$classe,
+                             method = "nb", 
+                             trControl = modelTrainingControl)
+
+set.seed(reportSeedToUse)
+phase1SVMFit <- train(x = reducedCorrTrainingData[, -ncol(reducedCorrTrainingData)], 
+                      y = reducedCorrTrainingData$classe,
+                      method = "svmRadial", 
+                      trControl = modelTrainingControl)
+
+
+```
+
+&nbsp;
+
+
+```{r, echo=FALSE, results='hide'}
+
 # ---------------------------------------------------------------------------------------------------
-# First, we need a function to build a dataframe holding all the CV errors for all 
-# the models created above:
+# Make a call to create the datasets with the results of training the candidate classifiers created 
+# in Phase 0.  These datasets will be used for the visualizations and analysis that follow below.
 # ---------------------------------------------------------------------------------------------------
-CreateModelsCVErrorDataset <- function(modelList)
-{
-  allModelsOOSErrors <- NULL
-  for(model in modelList)
-  {
-    currentModelOOSErrors <- data.frame(Model = model$method, FoldName = model$resample$Resample,
-                                        CVError = (1 - model$resample$Accuracy), 
-                                        stringsAsFactors = FALSE)
-    
-    if (is.null(allModelsOOSErrors)) 
-    {
-      allModelsOOSErrors <- currentModelOOSErrors
-    } # end if
-    else
-    {
-      allModelsOOSErrors <- rbind(allModelsOOSErrors, currentModelOOSErrors, stringsAsFactors = FALSE)
-    } # end else
-  } # end for
-  
-  # Relevel the model factor to be in ascending order according to the mean of its OOSErrors
-  OOSMeans <- aggregate(CVError ~ Model, data = allModelsOOSErrors, FUN = "mean")
-  OOSMeans <- OOSMeans[order(OOSMeans$CVError, decreasing = TRUE), ]
-  allModelsOOSErrors$Model <- factor(allModelsOOSErrors$Model, levels = OOSMeans$Model)
 
-  return (allModelsOOSErrors)
-} # end CreateModelsCVErrorDataset
+# -------------------------------------------------------------------------------------------------------
+# Define the model comparisons between Phase 1 to Phase 0
+# -------------------------------------------------------------------------------------------------------
+ModelComparisonOrderedLevelsPhase1 <- c("multinom1 - multinom0",  "lda1 - lda0", "svmRadial1 - svmRadial0", 
+                                        "treebag1 - treebag0", "xgbTree1 - xgbTree0", "rf1 - rf0", 
+                                        "rpart1 - rpart0", "nb1 - nb0",
+                                        "nb0 - nb1", "rpart0 - rpart1", "rf0 - rf1", "xgbTree0 - xgbTree1", 
+                                        "treebag0 - treebag1",  "svmRadial0 - svmRadial1", "lda0 - lda1", 
+                                        "multinom0 - multinom1") 
 
 
-# ---------------------------------------------------------------------------------------------------
-# Now create a function that builds a dataframe summarizing the error estimation and hyper-parameter
-# values for the final model chosen (by caret) for each model type trained.
-# ---------------------------------------------------------------------------------------------------
-CreateModelTuningSummaries <- function(modelList)
-{
-  allModelSummaries <- NULL
-  
-  for (model in modelList)
-  {
-    # First create a string with all of the final model tuning parameter values for the current
-    # model type
-    currentModelTuneParamList <- ""
-    
-    for (paramIndex in 1:ncol(model$bestTune))
-    {
-      paramVal <- model$bestTune[1, paramIndex]
-      paramName <- colnames(model$bestTune)[paramIndex]
-      
-      if(is.numeric(paramVal))
-      {
-        # Only format as a decimal if there is a decimal portion
-        tuneParam <- ifelse((round(paramVal) != paramVal), 
-                            sprintf("%s = %f ", paramName, paramVal),
-                            paste(paramName," = ", paramVal, " ", sep = ""))
-      } # end if
-      else
-      {
-        tuneParam <- paste(paramName," = ", paramVal, " ", sep = "")
-      } # end else
-      
-      currentModelTuneParamList <- paste(currentModelTuneParamList, tuneParam, sep = "")
-    } # end for
-    
-    # Create a row summarizing the performance and tuning of the current model
-    currentModelSummary <- data.frame(Model = model$method, 
-                                      CVError = 1 - max(model$results$Accuracy),
-                                      TotalTrainingTime = model$times$everything[3],
-                                      TuningParameters = currentModelTuneParamList,
-                                      stringsAsFactors = FALSE)
-    
-    # Now add the current model summary to the overall model summary dataset
-    if (is.null(allModelSummaries))
-    {
-      allModelSummaries <- currentModelSummary
-    } # end if
-    else
-    {
-      allModelSummaries <- rbind(allModelSummaries, currentModelSummary, stringsAsFactors = FALSE)
-    } #end else
-  } # end for
-  
-  # Sort the summary dataset by CV error in increasing order
-  allModelSummaries <- allModelSummaries[order(allModelSummaries$CVError), ]
-  
-  # Kill the row names
-  rownames(allModelSummaries) <- NULL
-  
-  # Now give more friendly names to the columns for plotting
-  colnames(allModelSummaries) <- c("Model", "CV Error", "Training Time (secs)",
-                                   "Final Tuning Parameters")
-  
-  # Now returns the results
-  return (allModelSummaries)
-} # end CreateModelTuningSummaries
 
-
-# --------------------------------------------------------------------------------------------------
-# Now create a function that builds a dataframe with the difference in error rates between models,
-# comparing two at a time.  This will be used to calculate statistics needed for model selection 
-# later in this document.
-# --------------------------------------------------------------------------------------------------
-CreateModelDiffsDataset <- function(modelsOOSErrors, modelComparisonsToMake, comparisonLevelOrder)
-{
-  allComparisons <- NULL
-  for(comparisonIndex in 1:nrow(modelComparisonsToMake))
-  {
-    # Grab the out-of-sample error data for each model
-    model1Name <- modelComparisonsToMake[comparisonIndex, 1]
-    model2Name <- modelComparisonsToMake[comparisonIndex, 2]
-    diffName <- paste(model1Name, " - ", model2Name, sep = "")
-    model1Errors <- subset(modelsOOSErrors, modelsOOSErrors$Model == model1Name)
-    model2Errors <- subset(modelsOOSErrors, modelsOOSErrors$Model == model2Name)
-    
-    # Now sort each vector by the fold name, so we're subtracting measurements for the same folds
-    model1Errors <- model1Errors[order(model1Errors$FoldName), ]
-    model2Errors <- model2Errors[order(model2Errors$FoldName), ]
-    errorDiff = model1Errors$CVError - model2Errors$CVError
-    
-    # Compile the results into a temporary dataframe
-    currentComparison <- data.frame(Model1 = model1Name, 
-                                    Model2 = model2Name,
-                                    DiffName = diffName,
-                                    OOSErrorDiff = errorDiff,
-                                    FoldName = model1Errors$FoldName,
-                                    stringsAsFactors = FALSE)
-    
-    # Now add the current comparison data to the larger dataset
-    if (is.null(allComparisons))
-    {
-      allComparisons <- currentComparison
-    } # end if
-    else
-    {
-      allComparisons <- rbind(allComparisons, currentComparison, stringsAsFactors = FALSE)
-    } # end else
-  } # end for
-  
-  # Relevel the combined diff name according to the order specified by the caller
-  allComparisons$DiffName <- factor(allComparisons$DiffName, levels = comparisonLevelOrder)
-  allComparisons <- allComparisons[order(allComparisons$DiffName, decreasing = TRUE), ]
-
-  return (allComparisons)
-} # end CreateModelDiffsDataset
-
-
-# --------------------------------------------------------------------------------------------------
-# Function that compares the means of the cross-validation errors of two two different models using 
-# the student t-test and returns the results in a dataframe.
-# --------------------------------------------------------------------------------------------------
-ComparePerfOfTwoModels <- function(model1Errors, model2Errors, model1Name, model2Name, significanceLevel)
-{
-  # Perform a t-test to compare the cross-validation errors of two models
-  confidenceLevel <- 1 - significanceLevel
-  tResult <- t.test(x = model1Errors$CVError, 
-                    y = model2Errors$CVError, 
-                    alternative = "less", 
-                    conf.level = confidenceLevel)
-  diffName = paste(model1Name, " - ", model2Name, sep="")
-  oosErrorMeanDiff <- tResult$estimate[1] - tResult$estimate[2]
-  
-  # Capture the t-test results and return it in a dataframe
-  modelComparison <- data.frame(Model1 = model1Name, 
-                                Model2 = model2Name, 
-                                DiffName = diffName,
-                                OOSErrorMeanDiff = oosErrorMeanDiff, 
-                                P.Value = tResult$p.value,
-                                T.Stat = tResult$statistic, 
-                                RejectH0 = (tResult$p.value < significanceLevel),
-                                stringsAsFactors = FALSE)
-
-  return (modelComparison)
-} # end ComparePerfOfTwoModels
-
-
-# --------------------------------------------------------------------------------------------------
-# Function that orchestrates the creation of a dataset with the results of model pair-wise t-test
-# comparison of the means of the respective cross-validation errors. 
-# --------------------------------------------------------------------------------------------------
-CreateModelComparisonsDataset <- function(modelsOOSErrors, modelComparisonsToMake, comparisonLevelOrder)
-{
-  # Now traverse each comparison, perform a t-test on the data, and add the results to a
-  # cumulative dataset
-  significanceLevel <- 0.05 / nrow(modelComparisonsToMake)
-  allModelComps <- do.call(rbind, apply(modelComparisonsToMake, 1, 
-                           function(modelPair)  
-                             ComparePerfOfTwoModels(modelsOOSErrors[modelsOOSErrors$Model == modelPair[1], ],
-                                                    modelsOOSErrors[modelsOOSErrors$Model == modelPair[2], ],
-                                                    modelPair[1], modelPair[2], significanceLevel)))
-  
-  # Relevel the DiffName factor to be in ascending order according to the mean of its diff OOSErrors
-  allModelComps$DiffName <- factor(allModelComps$DiffName, levels = comparisonLevelOrder)
-  allModelComps <- allModelComps[order(allModelComps$DiffName), ]
-  
-  # Now give more friendly names to the columns for plotting later
-  colnames(allModelComps) <- c("Model 1", "Model 2", "DiffName", "Diff Error Mean", "p-value",
-                               "t-statistic", "Reject $H_{0}$")
-  rownames(allModelComps) <- NULL
-  
-  return (allModelComps)
-} # end CreateModelComparisonsDataset
-
-
-# --------------------------------------------------------------------------------------------------
-# Function that orchestrates the creation of the different datasets derived from the models created
-# above that are needed for visualizaiton and further analysis below.
-# --------------------------------------------------------------------------------------------------
-CreateModelingResultsDatasets <- function(modelList, modelComparisonOrderedLevels)
-{
-  # Create a dataset of the cross-validation errors for each fold each model was trained against
-  modelsOOSErrors <- CreateModelsCVErrorDataset(modelList)
-  
-  # Create a dataset summarizing the results of the tuning and training process for each model
-  finalModelSummaries <- CreateModelTuningSummaries(modelList)
-  
-  # Get a list of all the different models in the dataset and then create the set of model by model 
-  # comparisons that need to be made
-  modelNames <- levels(modelsOOSErrors$Model)
-  modelComparisonsToMake <- permutations(length(modelNames), 2, modelNames)
-  
-  # Create a dataset that takes the difference between each model's cross-validation error
-  # (a pairwise comparison) fold-by-fold
-  perfComparisons <- CreateModelDiffsDataset(modelsOOSErrors, modelComparisonsToMake, 
-                                             modelComparisonOrderedLevels)
-  
-  # Create a dataset comparing the means of each model in pairwise comparisons using a t-test
-  perfAssessments <- CreateModelComparisonsDataset(modelsOOSErrors, modelComparisonsToMake, 
-                                                   modelComparisonOrderedLevels)
-
-  # Now return the results in a list
-  resultsList <- list(ModelOOSErrors = modelsOOSErrors,
-                      FinalModelSummaries = finalModelSummaries,
-                      ModelPerfComparisons = perfComparisons,
-                      ModelPerfAssessments = perfAssessments)
-} # end CreateModelingResultsDatasets
-
-
-# ---------------------------------------------------------------------------------------------------
-# Define the levels for the model comparisons for Phase 1
-# ---------------------------------------------------------------------------------------------------
-ModelComparisonOrderedLevelsPhase1 <- c("rf - xgbTree", "rf - treebag", "rf - gbm",
-                                  "rf - svmRadial", "rf - nb", "rf - lda", "rf - multinom", "rf - rpart", 
-                                  "xgbTree - rf", "xgbTree - treebag", "xgbTree - gbm", 
-                                  "xgbTree - svmRadial", "xgbTree - nb", "xgbTree - lda", 
-                                  "xgbTree - multinom", "xgbTree - rpart", 
-                                  "treebag - rf", "treebag - xgbTree", "treebag - gbm", "treebag - svmRadial",
-                                  "treebag - nb", "treebag - lda", "treebag - multinom", "treebag - rpart",
-                                  "gbm - rf", "gbm - xgbTree", "gbm - treebag", "gbm - svmRadial",
-                                  "gbm - nb", "gbm - lda", "gbm - multinom", "gbm - rpart", 
-                                  "svmRadial - rf", "svmRadial - xgbTree", "svmRadial - treebag",
-                                  "svmRadial - gbm", "svmRadial - nb", "svmRadial - lda", 
-                                  "svmRadial - multinom", "svmRadial - rpart",
-                                  "nb - rf", "nb - xgbTree", "nb - treebag", 
-                                  "nb - gbm", "nb - svmRadial", "nb - lda", "nb - multinom", "nb - rpart",
-                                  "lda - rf", "lda - xgbTree", "lda - treebag", 
-                                  "lda - gbm", "lda - svmRadial", "lda - nb", "lda - multinom", "lda - rpart", 
-                                  "multinom - rf", "multinom - xgbTree", "multinom - treebag",
-                                  "multinom - gbm", "multinom - svmRadial", "multinom - nb", 
-                                  "multinom - lda", "multinom - rpart",
-                                  "rpart - rf", "rpart - xgbTree", "rpart - treebag", 
-                                  "rpart - gbm", "rpart - svmRadial", "rpart - nb",  "rpart - lda", 
-                                  "rpart - multinom")
-
-
-# ---------------------------------------------------------------------------------------------------
-# Now build the list of datasets bringing together all the modeling results
-# ---------------------------------------------------------------------------------------------------
-modelResultsPhase1 <- CreateModelingResultsDatasets(list(rfFit, xgboostFit, baggedTreeFit, gbmFit, 
-                                                         naiveBayesFit, ldaFit, multinomialFit, rpartFit, 
-                                                         svmFit),
-                                                    ModelComparisonOrderedLevelsPhase1)
-
-
+# Now build the list of datasets bringing together all the modeling results for Phase 0
+modelResultsPhase1 <- CreateModelPerfResultsDatasetsWBetweenPhaseComparison(list(phase1RFFit, phase1XGBoostFit,
+                                                                                phase1BaggedTreeFit,
+                                                                                phase1NaiveBayesFit, 
+                                                                                phase1LDAFit,
+                                                                                phase1MultinomialFit,
+                                                                                phase1RpartFit, phase1SVMFit),
+                                                                            modelResultsPhase0$ModelCVErrors,
+                                                                            1,
+                                                                            0,
+                                                                            ModelComparisonOrderedLevelsPhase1)
+ 
 ```
 
 
@@ -684,12 +704,12 @@ modelResultsPhase1 <- CreateModelingResultsDatasets(list(rfFit, xgboostFit, bagg
 
 #### Model Training / Tuning Results
 
-First, presented below are the results of the tuning and final models:
+First, presented below are the results of the tuning and final models for this phase:
 
 ```{r, echo=FALSE, fig.align='center', results="asis"}
 
 panderOptions('table.alignment.default',"left")
-pander(modelResultsPhase1$FinalModelSummaries, caption = "Table 1: Cross-validation errors and final model parameters for the candidate classification models created above.  The lower the cross-validation error, the more accurate is its classifier.")
+pander(modelResultsPhase1$FinalModelSummaries, caption = "Table 4: Cross-validation errors and final model parameters for the candidate classification models created above.  The lower the cross-validation error, the more accurate is its classifier.")
 
 ```
 
@@ -697,9 +717,9 @@ pander(modelResultsPhase1$FinalModelSummaries, caption = "Table 1: Cross-validat
 Additionally to better visualize the estimated variance for each model, given below is a box plot of the cross-validation error rates by model in decreasing order:
 
 
-```{r, echo=FALSE, fig.path="figures/", fig.align='center', fig.cap='Figure 2: Distribution of the cross-validation errors across 50 folds for the different models.  The lower (closer to zero) a distribution is, the more accurate is its classifier.', fig.height=5, fig.show='asis'}
+```{r, echo=FALSE, fig.path="figures/", fig.align='center', fig.cap='Figure 5: Distribution of the cross-validation errors across 50 folds for the different models.  The lower (closer to zero) a distribution is, the more accurate is its classifier.', fig.height=5, fig.show='asis'}
 
-ggplot(modelResultsPhase1$ModelOOSErrors) + 
+ggplot(modelResultsPhase1$ModelCVErrors) + 
   geom_boxplot(notch=FALSE, fill="red", aes(x=Model, y=CVError)) + 
   xlab("Model Type") + ylab("CV Error")
 
@@ -709,260 +729,150 @@ ggplot(modelResultsPhase1$ModelOOSErrors) +
 
 #### Statistical Comparison of Models
 
-In order to understand which models are truly the best for the WLE data, it is necessary to calculate the difference in the CV errors doing pair-wise model comparisons, and then running t-tests on those pair-wise differences to determine statistical significance.
+Instead of comparing all of the models trained in Phase 1 with each other, we are going to instead compare a model trained in Phase 1 with the same model type in Phase 0 (the baseline) to see if reducing correlated predictor pairs makes results better or worse.  We will need to check both cases (better and worse) by doing all of the t-test comparisons together, but will present the outcome separately for readability.  
 
-First, the difference in cross-validation (i.e. out-of-sample) error between each model (model 1) and EVERY other model (model 2) is calculated according to the following formula:
+Again keeping the *Bonferroni correction* in mind, the significance values used for each of the t-tests will be different this time, i.e. the significance level $= 0.05 / 16 = 0.00313$.  16 is the total number of model comparisons calculated as $m_{Total} = n * m_{ComparisonsPerModel}$ where $n = 8$ is the number of models each with $m_{ComparisonsPerModel} = 2$ comparisons: Phase 1 Mean CV Error < Phase 0 Mean CV Error, and Phase 0 Mean CV Error < Phase 1 Mean CV Error for the model in question.
 
-$CV Error Difference = CVError_{model1} - CVError_{model2}$;
 
-The boxplots of these differences are then shown below for each model:
+&nbsp;
 
-```{r, echo=FALSE, fig.path="figures/", fig.align='center', fig.cap='Figure 3: Distribution of the difference between cross-validation errors across 50 folds for the different model pairwise comparisons', fig.height=10, fig.show='asis'}
 
-# Make separate distinct plots for the differences between each model and all the others
-rfCompPlot <- ggplot(subset(modelResultsPhase1$ModelPerfComparisons, Model1 == "rf")) + 
-                     geom_boxplot(notch=FALSE, fill="red", aes(x=DiffName, y=OOSErrorDiff)) + 
-                     coord_flip() + 
-                     xlab("Model Pairwise Comparison") + ylab("CV Error Difference") + 
-                     ggtitle("rf Comparisons")
 
-xgbCompPlot <- ggplot(subset(modelResultsPhase1$ModelPerfComparisons, Model1 == "xgbTree")) + 
-                      geom_boxplot(notch=FALSE, fill="red", aes(x=DiffName, y=OOSErrorDiff)) + 
-                      coord_flip() + 
-                      xlab("Model Pairwise Comparison") + ylab("CV Error Difference") +
-                      ggtitle("xgbTree Comparisons")
+##### *Comparing Phase 1 models with the same Phase 0 models - Are any Phase 1 models better?*
 
-bagCompPlot <- ggplot(subset(modelResultsPhase1$ModelPerfComparisons, Model1 == "treebag")) + 
-                      geom_boxplot(notch=FALSE, fill="red", aes(x=DiffName, y=OOSErrorDiff)) + 
-                      coord_flip() + 
-                      xlab("Model Pairwise Comparison") + ylab("CV Error Difference") +
-                      ggtitle("treebag comparisons")
+As described above, the boxplots of the distribution of the differences *Phase 1 CV Error - Phase 0 CV Error* taken for each fold are shown below for each model comparison:
 
-gbmCompPlot <- ggplot(subset(modelResultsPhase1$ModelPerfComparisons, Model1 == "gbm")) + 
-                      geom_boxplot(notch=FALSE, fill="red", aes(x=DiffName, y=OOSErrorDiff)) + 
-                      coord_flip() + 
-                      xlab("Model Pairwise Comparison") + ylab("CV Error Difference") +
-                      ggtitle("gbm Comparisons")
+```{r Phase1BPCompBetter, echo=FALSE, fig.path="figures/", fig.align='center', fig.cap='Figure 6: Distribution of the difference between CV errors across 50 folds for the different model pairwise comparisons', fig.height=6, fig.show='asis', warning=FALSE}
 
-svmCompPlot <- ggplot(subset(modelResultsPhase1$ModelPerfComparisons, Model1 == "svmRadial")) + 
-                      geom_boxplot(notch=FALSE, fill="red", aes(x=DiffName, y=OOSErrorDiff)) + 
-                      coord_flip() + 
-                      xlab("Model Pairwise Comparison") + ylab("CV Error Difference") +
-                      ggtitle("svm Comparisons")
-
-nbCompPlot <- ggplot(subset(modelResultsPhase1$ModelPerfComparisons, Model1 == "nb")) + 
-                     geom_boxplot(notch=FALSE, fill="red", aes(x=DiffName, y=OOSErrorDiff)) + 
-                     coord_flip() + 
-                     xlab("Model Pairwise Comparison") + ylab("CV Error Difference") +
-                     ggtitle("nb Comparisons")
-  
-  
-ldaCompPlot <- ggplot(subset(modelResultsPhase1$ModelPerfComparisons, Model1 == "lda")) + 
-                      geom_boxplot(notch=FALSE, fill="red", aes(x=DiffName, y=OOSErrorDiff)) + 
-                      coord_flip() + 
-                      xlab("Model Pairwise Comparison") + ylab("CV Error Difference") +
-                      ggtitle("lda Comparisons")
-
-multinomCompPlot <- ggplot(subset(modelResultsPhase1$ModelPerfComparisons, Model1 == "multinom")) + 
-                           geom_boxplot(notch=FALSE, fill="red", aes(x=DiffName, y=OOSErrorDiff)) + 
-                           coord_flip() + 
-                           xlab("Model Pairwise Comparison") + ylab("CV Error Difference") +
-                           ggtitle("multinom Comparisons")
-
-rpartCompPlot <- ggplot(subset(modelResultsPhase1$ModelPerfComparisons, Model1 == "rpart")) + 
-                        geom_boxplot(notch=FALSE, fill="red", aes(x=DiffName, y=OOSErrorDiff)) + 
-                        coord_flip() + 
-                        xlab("Model Pairwise Comparison") + ylab("CV Error Difference") +
-                        ggtitle("rpart Comparisons")
-  
-# Now arrange all the plots in the order of best to work model (in terms of CV Error)  
-grid.arrange(rfCompPlot, xgbCompPlot, bagCompPlot, gbmCompPlot, svmCompPlot, nbCompPlot, 
-             ldaCompPlot, multinomCompPlot, rpartCompPlot,
-             nrow = 5, ncol = 2)
+# -------------------------------------------------------------------------------------------------------
+# Make a single plot showing the difference in CV error rate taken between the Phase 1 and Phase 0 versions of 
+# each model type.
+# -------------------------------------------------------------------------------------------------------
+ggplot(subset(modelResultsPhase1$PhasePerfComparisons, ComparesCurrentToPrevious == TRUE)) + 
+       geom_boxplot(notch=FALSE, fill="red", aes(x=DiffName, y=CVErrorDiff)) + 
+       coord_flip() + 
+       xlab("Model Pairwise Comparison") + ylab("Mean cv Error Difference") + 
+       ggtitle("Phase 1 - Phase 0 Model Differences")
 
 ```
 
 &nbsp;
 
-Next, perform a t-test on each model comparison's mean difference in CV error according to the following hypotheses:
+Additionally, t-tests are performed to determine the statistical significance of any differences testing for the following set of hypotheses:  
 
-$H_{0}: \mu_{CVError, model1} - \mu_{CVError, model2} = 0$;   $H_{a}: \mu_{CVError, model1} - \mu_{CVError, model2} < 0$
+$H_{0}: \mu_{CVError, Phase 1 model{i}} - \mu_{CVError, Phase 0 model{i}} = 0$;  
 
-For the above, the significance level $\alpha$ will need to be adjusted lower to $\alpha / m$ (i.e. the *Bonferroni correction*) in order to reject $H_{0}$ as the chance of a rare event increases with multiple comparisons, and therefore, the likelihood of incorrectly rejecting $H_{0}$ increases.  
-Here $m = n! / (n - k)!$, where **m** = total number of comparisons, **n** = number of models, and **k** = number of models in a single comparison. Plugging in the numbers then produces the following:  
-$m = 9! / (9 - 2)! = 72$  
-using the standard $\alpha = 0.05$, the significance level $= 0.05 / 72 = 0.000694$
+$H_{a}: \mu_{CVError, Phase 1 model{i}} - \mu_{CVError, Phase 0 model{i}} < 0$
 
-$H_{0}$ will therefore be rejected if for a given model-to-model comparison t-test, the corresponding *p-value* is less than 0.000694. In that case, the data provides convincing evidence that Model 1's error rate is actually lower than Model 2's (i.e. $H_{a}$ is true).
 
-```{r, echo=FALSE}
-rownames(modelResultsPhase1$ModelPerfAssessments) <- NULL
+```{r Phase1TTestBetter, echo=FALSE}
+
+# Grab only the current phase to the baseline phase comparisons (not the other way around)
+currentToPreviousPhaseComparisons <- subset(modelResultsPhase1$PhasePerfAssessments, 
+                                            ComparesCurrentToPrevious == TRUE)[, -c(3, 8)]
+rownames(currentToPreviousPhaseComparisons) <- NULL
+
+# Display a table of the t-test results of the comparisons across phases
 panderOptions('table.alignment.default',"left")
 panderOptions('table.emphasize.rownames',FALSE)
-pander(modelResultsPhase1$ModelPerfAssessments[, -3], 
-       caption = "Table 2: Model pair-wise t-test comparisons")
+pander(currentToPreviousPhaseComparisons, 
+       caption = "Table 5: Pair-wise t-test comparisons for the same model types from Phase 1 to Phase 0")
 
 ```
 
 &nbsp;
 
-#### Conclusions / Final Prediction Model Selection - Phase 1
 
-__From the data given above, we can conclude the following:__
+##### *Comparing Phase 1 Models with Phase 0 - Are any Phase 0 models better?*
 
-* *The data presented in this report provides evidence that the Random Forest (rf) model has a lower CV error rate than all other candidate models except for the Extreme Gradient Boosting Tree (xgbTree) model.* However the data DOES NOT provide evidence that the Extreme Gradient Boosting model has a lower CV error rate either.
+Now comparing in the opposite direction, the boxplots of the distribution of the differences *Phase 0 CV Error - Phase 1 CV Error* taken for each fold are shown below for each model comparison:
 
-* *The Random Forest (rf) model had a mean CV error rate of the 50 train \ cross validation runs of 0.005871, which was the lowest of any model created in this report. * It's complexity and training times are also significantly less than the next closest competing model (xgbTree).
+```{r Phase1BPCompWorse, echo=FALSE, fig.path="figures/", fig.align='center', fig.cap='Figure 6: Distribution of the difference between CV errors across 50 folds for the different model pairwise comparisons', fig.height=6, fig.show='asis', warning=FALSE}
+
+# -------------------------------------------------------------------------------------------------------
+# Make a single plot showing the difference in CV error rate taken between the Phase 1 and Phase 0 versions of 
+# each model type.
+# -------------------------------------------------------------------------------------------------------
+ggplot(subset(modelResultsPhase1$PhasePerfComparisons, ComparesCurrentToPrevious == FALSE)) + 
+       geom_boxplot(notch=FALSE, fill="red", aes(x=DiffName, y=CVErrorDiff)) + 
+       coord_flip() + 
+       xlab("Model Pairwise Comparison") + ylab("Mean cv Error Difference") + 
+       ggtitle("Phase 0 - Phase 1 Model Differences")
+
+```
 
 
-*****
+&nbsp;
 
 
-## Predictions on the Test Set - Phase 1
+Additionally, t-tests are performed to determine the statistical significance of any differences testing for the following set of hypotheses:  
+
+$H_{0}: \mu_{CVError, Phase 0 model{i}} - \mu_{CVError, Phase 1 model{i}} = 0$;  
+
+$H_{a}: \mu_{CVError, Phase 0 model{i}} - \mu_{CVError, Phase 1 model{i}} < 0$
+
+
+```{r Phase1TTestWorse, echo=FALSE}
+
+
+# Grab only the baseline to current phase phase comparisons (not the other way around)
+previousToCurrentPhaseComparisons <- subset(modelResultsPhase1$PhasePerfAssessments, 
+                                            ComparesCurrentToPrevious == FALSE)[, -c(3, 8)]
+rownames(previousToCurrentPhaseComparisons) <- NULL
+
+# Display a table of the t-test results of the comparisons across phases
+panderOptions('table.alignment.default',"left")
+panderOptions('table.emphasize.rownames',FALSE)
+pander(previousToCurrentPhaseComparisons, 
+       caption = "Table 5: Pair-wise t-test comparisons for the same model types from Phase 1 to Phase 0")
+
+```
+
+
+&nbsp;
+
+
+#### Predictions on the Test Set
 
 ```{r, echo=FALSE, warning=FALSE, results='hide'}
 
-# ------------------------------------------------------------------------------------------------------------
-MapClassToProbabilities <- function(predictedClassLabel, classLevels)
-{
-    classProbabilities <- data.frame(A = 0.0, B = 0.0, C = 0.0, D = 0.0, E = 0.0)
-    classProbabilities[1, which(classLevels == predictedClassLabel)] = 1.0
-    return(classProbabilities)
-} # end MapClassToProbabilities
-
-
-# ------------------------------------------------------------------------------------------------------------
-CreateTestPredictionResults <- function(model, testDataset, labels)
-{
-  # Create the class levels that will be used below to determine the predicted class from the max. predicted
-  # class probability for a given observation
-  classeLevels <- gl(5, 1)
-  levels(classeLevels) <- c("A", "B", "C", "D", "E")
-  
-  # First get the predictions on the test dataset
-  classProbabilities <- predict(model, newdata = testDataset, type = "prob")
-  
-  # Some models don't return probabilities, so for those, predict the class for each example and set the 
-  # predicted class's probability to 100% and everything else to 0.
-  # Note: The assumption is that if NA is returned for one probability in one example, it will be NA for all
-  # probabilities across all examples.
-  if (sum(is.na(classProbabilities)) > 0)
-  {
-    classPredictions <- predict(model, newdata = testDataset, type = "raw")
-    classProbabilities <- do.call(rbind, lapply(classPredictions,
-                                                function(predictedClass)
-                                                MapClassToProbabilities(predictedClass,
-                                                                        levels(classeLevels))))
-    
-  }  # end if
-  
-  # Build the dataset of prediction results
-  obsIDs <- seq(1, nrow(testDataset))
-  obsLabel <- paste(labels, "(sample", obsIDs, ")", sep = "")
-  testPredictions <- data.frame(ObservationID = obsIDs,
-                                Model = model$method,
-                                A = classProbabilities$A,
-                                B = classProbabilities$B,
-                                C = classProbabilities$C,
-                                D = classProbabilities$D,
-                                E = classProbabilities$E,
-                                ObservationLabel = obsLabel,
-                                PredictedClasse = levels(classeLevels)[apply(classProbabilities, 1,
-                                                                             which.is.max)],
-                                ActualClasse = labels)
-  
-  return (testPredictions)
-} # end CreateTestPredictionResults
-
-
-CreateModelTestPerfSummary <- function(modelTestPredictions)
-{
-  # Create a dataframe with the error rate for the given model
-  error <- 1 - (sum(modelTestPredictions$PredictedClasse == modelTestPredictions$ActualClasse) /
-                nrow(modelTestPredictions))
-  modelTestPerfSummary <- data.frame(Model = modelTestPredictions[1, "Model"], TestError = error)
-  
-  return (modelTestPerfSummary)
-} # end CreateModelTestPerfSummary
-
-
-CreateTestPredictionDatasets <- function(modelList, testDataset)
-{
-   # Create a base dataframe with the prediction results for each test observation
-   allModelsTestPredictions <- do.call(rbind, lapply(modelList, function(model) 
-                                                     CreateTestPredictionResults(model, 
-                                                     testDataset[, -ncol(testDataset)],
-                                                     testDataset[, ncol(testDataset)])))
-
-   # Now summarize the prediciton data into error estimates per model
-   allModelsTestPerfsummary <- do.call(rbind, lapply(split(allModelsTestPredictions,
-                                                           allModelsTestPredictions$Model),
-                                                     function(modelTestPredicitons)
-                                                     CreateModelTestPerfSummary(modelTestPredicitons)))
-
-   # Now reorder and relevel the result dataframe in increasing order for the error
-   allModelsTestPerfsummary <- allModelsTestPerfsummary[order(allModelsTestPerfsummary$TestError), ]
-   allModelsTestPerfsummary$Model <- factor(allModelsTestPerfsummary$Model, 
-                                            levels = allModelsTestPerfsummary$Model)
-
-   # Now give more friendly names to the columns for visualization later in this document
-   colnames(allModelsTestPerfsummary) <- c("Model", "Test Set Error")
-
-   # Kill the row names
-   rownames(allModelsTestPerfsummary) <- NULL
-   
-   # Finally, create a melted dataset that will be used to create heatmaps
-   meltedTestResults <- melt(allModelsTestPredictions[, 1:8], 
-                             id.vars = c("ObservationID", "Model", "ObservationLabel"),
-                             variable.name = "Classe", value.name = "Probability")
-   meltedTestResults <- meltedTestResults[order(meltedTestResults$ObservationID, decreasing = TRUE), ]
-   meltedTestResults$ObservationLabel <- factor(meltedTestResults$ObservationLabel, 
-                                             levels = meltedTestResults$ObservationLabel)
-   # Kill the row names
-   rownames(meltedTestResults) <- NULL
-   
-   
-   # Now return the results in a list
-   testResultsList <- list(ModelTestPredictions = allModelsTestPredictions, 
-                           ModelTestPerfSummary = allModelsTestPerfsummary,
-                           MeltedTestResults = meltedTestResults)
-   return(testResultsList)
-} # end CreateTestPredictionDatasets
-
-
 # -------------------------------------------------------------------------------------------------------
-# Call to execute the predictions on the test data by the various candidate models from Phase 1 and  
-# create the necessary datasets needed for analysis and visualization below.
-#
-# Note: SVM is excluded from these predictions for now as that particular model doesn't provide 
-#       class probabilities, only raw class predictions.  The code will need to be modified to handle that 
-#       case and will be done so shortly.
+# Create predictions on the test data by the various candidate models from Phase 1 and  
+# additional datasets needed for analysis and visualization below.
 # -------------------------------------------------------------------------------------------------------
-testPredictionDatasets <- CreateTestPredictionDatasets(list(rfFit, xgboostFit, baggedTreeFit, gbmFit, 
-                                                            naiveBayesFit, ldaFit, multinomialFit,
-                                                            rpartFit, svmFit), 
-                                                       wleTestData)
+phase1TestPredictionDatasets <- CreateTestPredictionDatasets(list(phase1XGBoostFit,
+                                                                  phase1RFFit, 
+                                                                  phase1BaggedTreeFit, 
+                                                                  phase1SVMFit, 
+                                                                  phase1NaiveBayesFit, 
+                                                                  phase1LDAFit,
+                                                                  phase1MultinomialFit, 
+                                                                  phase1RpartFit), 
+                                                             reducedCorrTestData, 
+                                                             1,
+                                                             phase0TestPredictionDatasets$ModelTestPerfSummary,
+                                                             0)
 
 ```
+
 
 Given below is a summary of the error rate of predictions run on the test dataset:
 
 ```{r, echo=FALSE, fig.align='center', results="asis"}
 
 panderOptions('table.alignment.default',"left")
-pander(testPredictionDatasets$ModelTestPerfSummary, caption = "Table 3: Error rate by model for predictions against a test dataset of 20 observations.")
+pander(phase1TestPredictionDatasets$ModelTestPerfSummary, caption = "Table 6: Error rate by model for predictions against a test dataset of 20 observations.")
 
 ```
-
 
 &nbsp;
 
 Additionally, shown below are heat maps of each model's predictions:
 
-```{r, echo=FALSE, fig.path="figures/", fig.align='center', fig.cap='Figure 4: Heat map of predictions on the test set with five classes for each model type. The true classes are shown in the row labels while columns quantify the probabilities for each class (labeled A through E)', fig.height=14, fig.width=14, fig.show='asis', warning=FALSE}
+```{r, echo=FALSE, fig.path="figures/", fig.align='center', fig.cap='Figure 7: Heat map of predictions on the test set with five classes for each model type. The true classes are shown in the row labels while columns quantify the probabilities for each class (labeled A through E)', fig.height=14, fig.width=14, fig.show='asis', warning=FALSE}
 
-# ggplot(subset(testPredictionDatasets$MeltedTestResults, Model != "svmRadial"), aes(Classe, ObservationLabel)) + 
-ggplot(testPredictionDatasets$MeltedTestResults, aes(Classe, ObservationLabel)) + 
+# ggplot(subset(phase0TestPredictionDatasets$MeltedTestResults, Model != "svmRadial"), aes(Classe, ObservationLabel)) + 
+ggplot(phase1TestPredictionDatasets$MeltedTestResults, aes(Classe, ObservationLabel)) + 
        geom_tile(aes(fill = Probability), colour = "white") + 
        scale_fill_gradient2(low = "white", high = "steelblue", guide = "legend") +
        theme_grey(base_size = 9) + 
@@ -970,6 +880,22 @@ ggplot(testPredictionDatasets$MeltedTestResults, aes(Classe, ObservationLabel)) 
        facet_wrap(~ Model)
 
 ```
+
+
+&nbsp;
+
+
+#### Conclusions 
+
+__From the data given above, we can conclude the following:__
+
+* *In this phase, the classifier with the lowest error rate was the Random Forest (as opposed to Phase 0 where it was the Gradient Boosted Tree).  The classifier with the highest error rate was again the RPart decision tree (althought its error rate was slightly lower this time).* 
+
+* *The data presented in this report provides evidence that training on a dataset where all correlated predictor pairs were removed from the Phase 0 training set, yielded classifiers that actually performed WORSE (i.e. had a higher CV error rate) than those created in Phase 0 for the following models: Random Forest (rf), eXtreme Gradient Boosted Trees (xgbTree), Bagged Trees (treeBag), Linear Discriminant Analysis (lda), Multinomial Logistic Regression (multinom), and Support Vector Machine with Radial Basis Function Kernal (svmRadial).* 
+
+* *The evidence also shows that only the Naive Bayes (nb) classifier actually lowered its error rate (by ~2%) when correlated predictors were removed from the Phase 0 training set. * 
+
+* *Despite the statistically significant decrease in performance, the four classifiers with the lowest CV errors (rf, xgbTree, treeBag, and svmRadial) still generalized very well to the small test set with 0% error as in Phase 0. The Multinomial Logistic Regression (multinom) and RPart Decision Tree (rpart) classifiers saw their error rates reduced by 5% (to .35 and .55 respectively). Only the LDA classifier showed worse performance (error rate up 10% from .3 to .4)* 
 
 
 *****
@@ -990,351 +916,299 @@ The objective of this phase is to perform standarization on numeric features in 
 ```{r, echo=TRUE, warning=FALSE}
 
 wlePreProcValues <- preProcess(wleTrainingData, method = c("center", "scale"))
-standardizedWLETrainingData <- predict(wlePreProcValues, wleTrainingData)
-standardizedWLETestData <- predict(wlePreProcValues, wleTestData)
+standardizedTrainingData <- predict(wlePreProcValues, wleTrainingData)
+standardizedTestData <- predict(wlePreProcValues, wleTestData)
 
 # Give an example of the difference between the base training set and the scaled one, for the first 5 columns
 # (all of which are numeric)
 head(wleTrainingData[, c(1:5)])
-head(standardizedWLETrainingData[, c(1:5)])
+head(standardizedTrainingData[, c(1:5)])
 
 ```
 
 
-#### 2. Build candidate predication models 
+&nbsp;
 
-All the classifiers built in Phase 1 are now built again in this phase; the only difference being the training dataset now contains standardized numeric features.  Given below is the code to create those classifiers in the same groupings as above.
+##### 2. Build candidate predication models with the modified training set
 
-First new tree-based models are trained on the standardized training set:
+All the classifiers built in previous phases are now built here again; the only difference being the training dataset has some of the pairwise correlated predictors removed.  Given below is the code to create those classifiers in the same groupings as above.
 
-```{r ScaledTreeClassifiers, echo=TRUE, cache=TRUE, warning=FALSE, message=FALSE}
+
+First the tree-based models are trained:
+
+```{r Phase2TreeClassifiers, echo=TRUE, cache=TRUE, warning=FALSE, message=FALSE}
 
 set.seed(reportSeedToUse)
-scaledRpartFit <- train(x = standardizedWLETrainingData[, -ncol(standardizedWLETrainingData)], 
-                        y = standardizedWLETrainingData$classe,
+phase2RpartFit <- train(x = standardizedTrainingData[, -ncol(standardizedTrainingData)], 
+                        y = standardizedTrainingData$classe,
                         method = "rpart", 
                         trControl = modelTrainingControl)
 
 set.seed(reportSeedToUse)
-scaledBaggedTreeFit <- train(x = standardizedWLETrainingData[, -ncol(standardizedWLETrainingData)], 
-                             y = standardizedWLETrainingData$classe,
+phase2BaggedTreeFit <- train(x = standardizedTrainingData[, -ncol(standardizedTrainingData)], 
+                             y = standardizedTrainingData$classe, 
                              method = "treebag", 
                              trControl = modelTrainingControl)
 
 set.seed(reportSeedToUse)
-scaledRFFit <- train(x = standardizedWLETrainingData[, -ncol(standardizedWLETrainingData)], 
-                     y = standardizedWLETrainingData$classe,
+phase2RFFit <- train(x = standardizedTrainingData[, -ncol(standardizedTrainingData)], 
+                     y = standardizedTrainingData$classe,
                      method = "rf", 
                      trControl = modelTrainingControl)
 
 set.seed(reportSeedToUse)
-scaledGBMFit <- train(x = standardizedWLETrainingData[, -ncol(standardizedWLETrainingData)], 
-                      y = standardizedWLETrainingData$classe,
-                      method = "gbm", 
-                      trControl = modelTrainingControl,
-                      verbose = FALSE)
-
-set.seed(reportSeedToUse)
-scaledXGBoostFit <- train(x = standardizedWLETrainingData[, -ncol(standardizedWLETrainingData)], 
-                          y = standardizedWLETrainingData$classe,
+phase2XGBoostFit <- train(x = standardizedTrainingData[, -ncol(standardizedTrainingData)], 
+                          y = standardizedTrainingData$classe,
                           method = "xgbTree", 
                           trControl = modelTrainingControl,
                           verbose = FALSE)
 
 ```
 
-Now build the linear classifiers on the standardized training set:
+Now build the linear classifiers:
 
-```{r ScaledLinearClassifiers, echo=TRUE, cache=TRUE, warning=FALSE, message=FALSE, results='hide'}
+```{r Phase2LinearClassifiers, echo=TRUE, cache=TRUE, warning=FALSE, message=FALSE, results='hide'}
 
 set.seed(reportSeedToUse)
-scaledMultinomialFit <- train(x = standardizedWLETrainingData[, -ncol(standardizedWLETrainingData)], 
-                              y = standardizedWLETrainingData$classe,
+phase2MultinomialFit <- train(x = standardizedTrainingData[, -ncol(standardizedTrainingData)], 
+                              y = standardizedTrainingData$classe,
                               method = "multinom", 
                               trControl = modelTrainingControl,
                               verbose = FALSE)
 
 set.seed(reportSeedToUse)
-scaledLDAFit <- train(x = standardizedWLETrainingData[, -ncol(standardizedWLETrainingData)], 
-                      y = standardizedWLETrainingData$classe,
+phase2LDAFit <- train(x = standardizedTrainingData[, -ncol(standardizedTrainingData)], 
+                      y = standardizedTrainingData$classe,
                       method = "lda", 
                       trControl = modelTrainingControl)
 
 ```
 
-Finally, build some miscellaneous non-linear classifiers on the standardized training set:
+Finally, build other miscellaneous non-linear classifiers of interest:
 
-```{r ScaledMiscClassifiers, echo=TRUE, cache=TRUE, warning=FALSE, message=FALSE}
+```{r Phase2MiscClassifiers, echo=TRUE, cache=TRUE, warning=FALSE, message=FALSE}
 
 set.seed(reportSeedToUse)
-scaledNaiveBayesFit <- train(x = standardizedWLETrainingData[, -ncol(standardizedWLETrainingData)], 
-                             y = standardizedWLETrainingData$classe,
+phase2NaiveBayesFit <- train(x = standardizedTrainingData[, -ncol(standardizedTrainingData)], 
+                             y = standardizedTrainingData$classe,
                              method = "nb", 
                              trControl = modelTrainingControl)
 
 set.seed(reportSeedToUse)
-scaledSVMFit <- train(x = standardizedWLETrainingData[, -ncol(standardizedWLETrainingData)], 
-                y = standardizedWLETrainingData$classe,
-                method = "svmRadial", 
-                trControl = modelTrainingControl)
+phase2SVMFit <- train(x = standardizedTrainingData[, -ncol(standardizedTrainingData)], 
+                      y = standardizedTrainingData$classe,
+                      method = "svmRadial", 
+                      trControl = modelTrainingControl)
+
 
 ```
 
 &nbsp;
 
-```{r echo=FALSE, warning=FALSE, message=FALSE}
 
-# -----------------------------------------------------------------------------------------------------------
-# Now create a function that builds a dataframe with the difference in error rates between the same models
-# between Phase 1 and Phase 2, comparing two at a time.  This will be used to calculate statistics needed for
-# model selection later in this document.
-# -----------------------------------------------------------------------------------------------------------
-CreatePhaseDiffDataset <- function(modelsOOSErrorsPhase1, 
-                                   modelsOOSErrorsPhase2, 
-                                   modelsToCompare, 
-                                   comparisonLevelOrder)
-{
-  allComparisons <- NULL
-  for(comparisonIndex in 1:length(modelsToCompare))
-  {
-    # Grab the out-of-sample error data for each model
-    modelName <- modelsToCompare[comparisonIndex]
-    diffName <- paste(modelName, "2 - ", modelName, "1", sep = "")
-    model1Errors <- subset(modelsOOSErrorsPhase1, modelsOOSErrorsPhase1$Model == modelName)
-    model2Errors <- subset(modelsOOSErrorsPhase2, modelsOOSErrorsPhase2$Model == modelName)
-    
-    # Now sort each vector by the fold name, so we're subtracting measurements for the same folds
-    model1Errors <- model1Errors[order(model1Errors$FoldName), ]
-    model2Errors <- model2Errors[order(model2Errors$FoldName), ]
-    errorDiff = model2Errors$CVError - model1Errors$CVError
-    
-    # Compile the results into a temporary dataframe
-    currentComparison <- data.frame(Model1 = paste(modelName, "1", sep=""), 
-                                    Model2 = paste(modelName, "2", sep=""),
-                                    DiffName = diffName,
-                                    OOSErrorDiff = errorDiff,
-                                    FoldName = model1Errors$FoldName,
-                                    stringsAsFactors = FALSE)
-    
-    # Now add the current comparison data to the larger dataset
-    if (is.null(allComparisons))
-    {
-      allComparisons <- currentComparison
-    } # end if
-    else
-    {
-      allComparisons <- rbind(allComparisons, currentComparison, stringsAsFactors = FALSE)
-    } # end else
-  } # end for
-  
-  # Relevel the combined diff name according to the order specified by the caller
-  allComparisons$DiffName <- factor(allComparisons$DiffName, levels = comparisonLevelOrder)
-  allComparisons <- allComparisons[order(allComparisons$DiffName), ]
-
-  return (allComparisons)
-} # end CreatePhaseDiffDataset
-
-
-# --------------------------------------------------------------------------------------------------
-# Function that orchestrates the creation of a dataset with the results of model pair-wise t-test
-# comparison of the means of the respective cross-validation errors. 
-# --------------------------------------------------------------------------------------------------
-CreatePhaseComparisonsDataset <- function(modelsOOSErrorsPhase1, 
-                                          modelsOOSErrorsPhase2, 
-                                          modelsToCompare, 
-                                          comparisonLevelOrder)
-{
-  # Now traverse each comparison, perform a t-test on the data, and add the results to a
-  # cumulative dataset
-  significanceLevel <- 0.05 / length(modelsToCompare)
-  allModelComps <- do.call(rbind, lapply(modelsToCompare,  
-                           function(model)  
-                           ComparePerfOfTwoModels(modelsOOSErrorsPhase2[modelsOOSErrorsPhase2$Model == model, ],
-                                                  modelsOOSErrorsPhase1[modelsOOSErrorsPhase1$Model == model, ],
-                                                  paste(model, "2", sep = ""), 
-                                                  paste(model, "1", sep = ""), 
-                                                  significanceLevel)))
-  
-  # Relevel the DiffName factor to be in ascending order according to the mean of its diff OOSErrors
-  allModelComps$DiffName <- factor(allModelComps$DiffName, levels = comparisonLevelOrder)
-  allModelComps <- allModelComps[order(allModelComps$DiffName), ]
-  
-  # Now give more friendly names to the columns for plotting
-  colnames(allModelComps) <- c("Model 1", "Model 2", "DiffName", "Diff Error Mean", "p-value",
-                               "t-statistic", "Reject $H_{0}$")
-  rownames(allModelComps) <- NULL
-  
-  return (allModelComps)
-} # end CreatePhaseComparisonsDataset
-
+```{r, echo=FALSE, results='hide'}
 
 # -------------------------------------------------------------------------------------------------------
-# Function that orchestrates the creation of all the datasets encapsulating the modeling results for
-# Phase 2.
+# Define the model comparisons between Phase 2 to Phase 0
 # -------------------------------------------------------------------------------------------------------
-CreateScaledModelingResultsDatasets <- function(modelList, modelsOOSErrorsPhase1, modelComparisonOrderedLevels)
-{
-  # First create the dataset that are used to assess the scaled models and compare them against each other, 
-  # just like in Phase 1.
-  modelsOOSErrorsPhase2 <- CreateModelsCVErrorDataset(modelList)
-  finalModelSummaries <- CreateModelTuningSummaries(modelList)
-  
-  
-  # Get a list of all the different models in the phase 2 dataset.  It is assumed that the same set of models 
-  # exist in phase 1.  
-  modelNames <- levels(modelsOOSErrorsPhase2$Model)
-
-  # Create a dataset that takes the difference between each model's cross-validation error
-  # (a pairwise comparison) fold-by-fold
-  perfComparisons <- CreatePhaseDiffDataset(modelsOOSErrorsPhase1, modelsOOSErrorsPhase2,
-                                            modelNames, modelComparisonOrderedLevels)
-  
-  # Create a dataset comparing the means of each model in pairwise comparisons using a t-test
-  perfAssessments <- CreatePhaseComparisonsDataset(modelsOOSErrorsPhase1, modelsOOSErrorsPhase2,
-                                                   modelNames, modelComparisonOrderedLevels)
-
-  # Now return the results in a list
-  resultsList <- list(ModelOOSErrors = modelsOOSErrorsPhase2,
-                      FinalModelSummaries = finalModelSummaries,
-                      PhasePerfComparisons = perfComparisons,
-                      PhasePerfAssessments = perfAssessments,
-                      ModelNames = modelNames)
-  return (resultsList)
-} # end CreateModelingResultsDatasets
+ModelComparisonOrderedLevelsPhase2 <- c("xgbTree2 - xgbTree0", "rf2 - rf0", "treebag2 - treebag0", 
+                                        "svmRadial2 - svmRadial0", "nb2 - nb0", 
+                                        "multinom2 - multinom0", "lda2 - lda0", "rpart2 - rpart0",
+                                        "xgbTree0 - xgbTree2", "rf0 - rf2", "treebag0 - treebag2",
+                                        "svmRadial0 - svmRadial2", "nb0 - nb2", 
+                                        "multinom0 - multinom2", "lda0 - lda2", "rpart0 - rpart2") 
 
 
-# -------------------------------------------------------------------------------------------------------
-# Define the model comparisons between Phase 1 to Phase 2
-# -------------------------------------------------------------------------------------------------------
-ModelComparisonOrderedLevelsPhase2 <- c("rf2 - rf1", "xgbTree2 - xgbTree1", "treebag2 - treebag1", 
-                                        "gbm2 - gbm1", "svmRadial2 - svmRadial1", "nb2 - nb1", 
-                                        "multinom2 - multinom1", "lda2 - lda1", "rpart2 - rpart1") 
-
-# -------------------------------------------------------------------------------------------------------
 # Now build the list of datasets bringing together all the modeling results for Phase 2
-# -------------------------------------------------------------------------------------------------------
-modelResultsPhase2 <- CreateScaledModelingResultsDatasets(list(scaledRFFit, scaledXGBoostFit,
-                                                               scaledBaggedTreeFit, scaledGBMFit,
-                                                               scaledNaiveBayesFit, scaledMultinomialFit,
-                                                               scaledLDAFit, scaledRpartFit, scaledSVMFit),
-                                                          modelResultsPhase1$ModelOOSErrors,
-                                                          ModelComparisonOrderedLevelsPhase2)
+modelResultsPhase2 <- CreateModelPerfResultsDatasetsWBetweenPhaseComparison(list(phase2RFFit, 
+                                                                                phase2XGBoostFit,
+                                                                                phase2BaggedTreeFit,
+                                                                                phase2NaiveBayesFit, 
+                                                                                phase2LDAFit,
+                                                                                phase2MultinomialFit,
+                                                                                phase2RpartFit, phase2SVMFit),
+                                                                           modelResultsPhase0$ModelCVErrors,
+                                                                           2,
+                                                                           0,
+                                                                           ModelComparisonOrderedLevelsPhase2)
+ 
 
 ```
+
+
+*****
+
 
 ## Findings - Phase 2
 
 #### Model Training / Tuning Results
 
-First, presented below are the results of the tuning and final scaled models:
+First, presented below are the results of the tuning and final models for this phase:
 
 ```{r, echo=FALSE, fig.align='center', results="asis"}
 
 panderOptions('table.alignment.default',"left")
-pander(modelResultsPhase2$FinalModelSummaries, caption = "Table 4: CV errors and final model parameters for the SCALED candidate classification models created for Phase 2.  The lower the CV Error, the more accurate is its classifier.")
+pander(modelResultsPhase2$FinalModelSummaries, caption = "Table 7: Cross-validation errors and final model parameters for the candidate classification models created above.  The lower the cross-validation error, the more accurate is its classifier.")
 
 ```
 
 
-Additionally to better visualize the estimated variance for each model, given below is a box plot of the CV error rates by model in decreasing order:
+Additionally to better visualize the estimated variance for each model, given below is a box plot of the cross-validation error rates by model in decreasing order:
 
 
-```{r, echo=FALSE, fig.path="figures/", fig.align='center', fig.cap='Figure 5: Distribution of the CV errors across 50 folds for the different SCALED models.  The lower (closer to zero) a distribution is, the more accurate is its classifier.', fig.height=5, warning=FALSE}
+```{r, echo=FALSE, fig.path="figures/", fig.align='center', fig.cap='Figure 8: Distribution of the cross-validation errors across 50 folds for the different models.  The lower (closer to zero) a distribution is, the more accurate is its classifier.', fig.height=5, fig.show='asis'}
 
-ggplot(modelResultsPhase2$ModelOOSErrors) + 
+ggplot(modelResultsPhase2$ModelCVErrors) + 
   geom_boxplot(notch=FALSE, fill="red", aes(x=Model, y=CVError)) + 
   xlab("Model Type") + ylab("CV Error")
 
 ```
-
-&nbsp;
-
 #### Statistical Comparison of Models
 
-As in Phase 1, we first compare the scaled models with each other to see if there is any difference between them.
-The boxplots of these differences are then shown below for each scaled model:
+Just like in Phase 1, here all of the models trained in Phase 2 with the same model type in Phase 0 (the baseline) to see if standardizing numeric predictors makes results better or worse.  We will need to check both cases (better and worse) by doing all of the t-test comparisons together, but will present the outcome separately for readability.  
 
-```{r, echo=FALSE, fig.path="figures/", fig.align='center', fig.cap='Figure 6: Distribution of the difference between CV errors across 50 folds for the different model pairwise comparisons', fig.height=6, fig.show='asis', warning=FALSE}
+Again keeping the *Bonferroni correction* in mind, the significance values used for each of the t-tests will be different this time, i.e. the significance level $= 0.05 / 16 = 0.00313$.  16 is the total number of model comparisons calculated as $m_{Total} = n * m_{ComparisonsPerModel}$ where $n = 8$ is the number of models each with $m_{ComparisonsPerModel} = 2$ comparisons: Phase 2 Mean CV Error < Phase 0 Mean CV Error, and Phase 0 Mean CV Error < Phase 2 Mean CV Error for the model in question.
+
+
+&nbsp;
+
+
+
+##### *Comparing Phase 2 models with the same Phase 0 models - Are any Phase 2 models better?*
+
+As described above, the boxplots of the distribution of the differences *Phase 2 CV Error - Phase 0 CV Error* taken for each fold are shown below for each model comparison:
+
+```{r Phase2BPCompBetter, echo=FALSE, fig.path="figures/", fig.align='center', fig.cap='Figure 9: Distribution of the difference between CV errors across 50 folds for the different model pairwise comparisons', fig.height=6, fig.show='asis', warning=FALSE}
 
 # -------------------------------------------------------------------------------------------------------
-# Make a single plot showing the difference in CV error rate taken between the Phase 2 and Phase 1 versions of 
+# Make a single plot showing the difference in CV error rate taken between the Phase 1 and Phase 0 versions of 
 # each model type.
 # -------------------------------------------------------------------------------------------------------
-ggplot(modelResultsPhase2$PhasePerfComparisons) + 
-       geom_boxplot(notch=FALSE, fill="red", aes(x=DiffName, y=OOSErrorDiff)) + 
+ggplot(subset(modelResultsPhase2$PhasePerfComparisons, ComparesCurrentToPrevious == TRUE)) + 
+       geom_boxplot(notch=FALSE, fill="red", aes(x=DiffName, y=CVErrorDiff)) + 
        coord_flip() + 
-       xlab("Model Pairwise Comparison") + ylab("Mean Error Difference ") + 
-       ggtitle("Phase 2 vs. Phase 1 Model Comparisons")
+       xlab("Model Pairwise Comparison") + ylab("Mean cv Error Difference") + 
+       ggtitle("Phase 2 - Phase 0 Model Differences")
 
 ```
 
 &nbsp;
 
-As in Phase 1, perform a t-test on each scaled model comparison's mean difference in CV error.  This
-time around however, the number of comparisons is equal to $n$ (i.e. 9) since the Phase 2 models are being compared only to the performance of their corresponding Phase 1 models (i.e. the Phase 2 rf classifier is only compared to the Phase 1 rf one), and only if the Phase 2 model is better than the Phase 1 one, not if it is worse.  
-Again keeping the *Bonferroni correction* correction in mind, the significance values used for each of the t-tests will be much higher this time, i.e. the significance level $= 0.05 / 9 = 0.0056$
+Additionally, t-tests are performed to determine the statistical significance of any differences testing for the following set of hypotheses:  
 
-```{r, echo=FALSE}
+$H_{0}: \mu_{CVError, Phase 2 model{i}} - \mu_{CVError, Phase 0 model{i}} = 0$;  
 
-rownames(modelResultsPhase2$PhasePerfAssessments) <- NULL
+$H_{a}: \mu_{CVError, Phase 2 model{i}} - \mu_{CVError, Phase 0 model{i}} < 0$
+
+
+```{r Phase2TTestBetter, echo=FALSE}
+
+# Grab only the current phase to the baseline phase comparisons (not the other way around)
+currentToPreviousPhaseComparisons <- subset(modelResultsPhase2$PhasePerfAssessments, 
+                                            ComparesCurrentToPrevious == TRUE)[, -c(3, 8)]
+rownames(currentToPreviousPhaseComparisons) <- NULL
+
+# Display a table of the t-test results of the comparisons across phases
 panderOptions('table.alignment.default',"left")
 panderOptions('table.emphasize.rownames',FALSE)
-pander(modelResultsPhase2$PhasePerfAssessments[, -3], 
-       caption = "Table 5: Pair-wise t-test comparisons for the same model types from Phase 1 to Phase 2")
+pander(currentToPreviousPhaseComparisons, 
+       caption = "Table 8: Pair-wise t-test comparisons for the same model types from Phase 2 to Phase 0")
+
+```
+
+&nbsp;
+
+
+##### *Comparing Phase 2 Models with Phase 0 - Are any Phase 0 models better?*
+
+Now comparing in the opposite direction, the boxplots of the distribution of the differences *Phase 0 CV Error - Phase 1 CV Error* taken for each fold are shown below for each model comparison:
+
+```{r Phase2BPCompWorse, echo=FALSE, fig.path="figures/", fig.align='center', fig.cap='Figure 10: Distribution of the difference between CV errors across 50 folds for the different model pairwise comparisons', fig.height=6, fig.show='asis', warning=FALSE}
+
+# -------------------------------------------------------------------------------------------------------
+# Make a single plot showing the difference in CV error rate taken between the Phase 1 and Phase 0 versions of 
+# each model type.
+# -------------------------------------------------------------------------------------------------------
+ggplot(subset(modelResultsPhase2$PhasePerfComparisons, ComparesCurrentToPrevious == FALSE)) + 
+       geom_boxplot(notch=FALSE, fill="red", aes(x=DiffName, y=CVErrorDiff)) + 
+       coord_flip() + 
+       xlab("Model Pairwise Comparison") + ylab("Mean cv Error Difference") + 
+       ggtitle("Phase 0 - Phase 2 Model Differences")
 
 ```
 
 
-*****
+&nbsp;
 
 
-#### Conclusions / Final Prediction Model Selection - Phase 2
+Additionally, t-tests are performed to determine the statistical significance of any differences testing for the following set of hypotheses:  
 
-__From the data given above, we can conclude the following:__
+$H_{0}: \mu_{CVError, Phase 0 model{i}} - \mu_{CVError, Phase 2 model{i}} = 0$;  
 
-* *Almost every model in Phase 1 had some slight performance deviation from the same model in Phase 2 (most showed a slight improvement), however only the multinomial logistic regression model showed a statistical significant improvment in terms of its cross-validation error rate when the numeric predictors in the training dataset were standardized.* 
-
-
-*****
+$H_{a}: \mu_{CVError, Phase 0 model{i}} - \mu_{CVError, Phase 2 model{i}} < 0$
 
 
-## Predictions on the Test Set - Phase 2
+```{r Phase2TTestWorse, echo=FALSE}
+
+
+# Grab only the baseline to current phase phase comparisons (not the other way around)
+previousToCurrentPhaseComparisons <- subset(modelResultsPhase2$PhasePerfAssessments, 
+                                            ComparesCurrentToPrevious == FALSE)[, -c(3, 8)]
+rownames(previousToCurrentPhaseComparisons) <- NULL
+
+# Display a table of the t-test results of the comparisons across phases
+panderOptions('table.alignment.default',"left")
+panderOptions('table.emphasize.rownames',FALSE)
+pander(previousToCurrentPhaseComparisons, 
+       caption = "Table 5: Pair-wise t-test comparisons for the same model types from Phase 1 to Phase 0")
+
+```
+
+
+&nbsp;
+
+
+#### Predictions on the Test Set - Phase 2
 
 ```{r, echo=FALSE, warning=FALSE, results='hide'}
 
 # -------------------------------------------------------------------------------------------------------
-# Call to execute the predictions on the test data by the various candidate models from Phase 2 and  
-# create the necessary datasets needed for analysis and visualization below.
-#
-# Note: SVM is excluded from these predictions for now as that particular model doesn't provide 
-#       class probabilities, only raw class predictions.  The code will need to be modified to handle that 
-#       case and will be done so shortly.
+# Create predictions on the test data by the various candidate models from Phase 2 and  
+# additional datasets needed for analysis and visualization below.
 # -------------------------------------------------------------------------------------------------------
-scaledTestPredictionDatasets <- CreateTestPredictionDatasets(list(scaledRFFit, scaledXGBoostFit,
-                                                               scaledBaggedTreeFit, scaledGBMFit, 
-                                                               scaledNaiveBayesFit, scaledMultinomialFit,
-                                                               scaledLDAFit, scaledRpartFit, scaledSVMFit),
-                                                             standardizedWLETestData)
+phase2TestPredictionDatasets <- CreateTestPredictionDatasets(list(phase2XGBoostFit,
+                                                                  phase2RFFit, 
+                                                                  phase2BaggedTreeFit, 
+                                                                  phase2SVMFit, 
+                                                                  phase2NaiveBayesFit, 
+                                                                  phase2LDAFit,
+                                                                  phase2MultinomialFit, 
+                                                                  phase2RpartFit), 
+                                                             standardizedTestData,
+                                                             2,
+                                                             phase0TestPredictionDatasets$ModelTestPerfSummary,
+                                                             0)
 
 ```
 
-Given below is a summary of the error rate of predictions run on the SCALED test dataset:
+
+Given below is a summary of the error rate of predictions run on the test dataset:
 
 ```{r, echo=FALSE, fig.align='center', results="asis"}
 
 panderOptions('table.alignment.default',"left")
-pander(scaledTestPredictionDatasets$ModelTestPerfSummary, caption = "Table 6: Error rate by model for predictions against a test dataset of 20 observations.")
+pander(phase2TestPredictionDatasets$ModelTestPerfSummary, caption = "Table 8: Error rate by model for predictions against a test dataset of 20 observations.")
 
 ```
-
 
 &nbsp;
 
 Additionally, shown below are heat maps of each model's predictions:
 
-```{r, echo=FALSE, fig.path="figures/", fig.align='center', fig.cap='Figure 7: Heat map of predictions on the test set with five classes for each model type. The true classes are shown in the row labels while columns quantify the probabilities for each class (labeled A through E)', fig.height=14, fig.width=14, fig.show='asis', warning=FALSE}
+```{r, echo=FALSE, fig.path="figures/", fig.align='center', fig.cap='Figure 9: Heat map of predictions on the test set with five classes for each model type. The true classes are shown in the row labels while columns quantify the probabilities for each class (labeled A through E)', fig.height=14, fig.width=14, fig.show='asis', warning=FALSE}
 
-ggplot(scaledTestPredictionDatasets$MeltedTestResults, aes(Classe, ObservationLabel)) + 
+# ggplot(subset(phase0TestPredictionDatasets$MeltedTestResults, Model != "svmRadial"), aes(Classe, ObservationLabel)) + 
+ggplot(phase2TestPredictionDatasets$MeltedTestResults, aes(Classe, ObservationLabel)) + 
        geom_tile(aes(fill = Probability), colour = "white") + 
        scale_fill_gradient2(low = "white", high = "steelblue", guide = "legend") +
        theme_grey(base_size = 9) + 
@@ -1342,6 +1216,26 @@ ggplot(scaledTestPredictionDatasets$MeltedTestResults, aes(Classe, ObservationLa
        facet_wrap(~ Model)
 
 ```
+
+
+&nbsp;
+
+
+#### Conclusions 
+
+__From the data given above, we can conclude the following:__
+
+* *In this phase, the classifier with the lowest error rate was the was the Gradient Boosted Tree (0.003659).  The classifier with the highest error rate was the RPart decision tree (.4943).* 
+
+* *The data presented in this report provides evidence that training on a dataset where all numeric predictors were standardized ONLY reduces the error for the Mulinomial Logistic Regression (multinom) classifier.*  This was a bit of a surprise, as it was expected that the Naive Bayes, LDA, and SVM classifiers would show improvement in their error rates.  It is possible that internally some of these classifiers are already doing the scaling on the training sets, in which case scaling as part of pre-processing upstream from training would be unnecessary. 
+
+* *The Multinomial Logistic Regression (multinom) showed significant reduction in its test error, down 15% from .4 to .25 from Phase 0 to Phase 2. All other classifiers had no change in their error rates from Phase 0 to Phase 2.* 
+
+
+*****
+
+
+
 
 
 
