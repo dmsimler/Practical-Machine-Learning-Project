@@ -2,7 +2,7 @@
 title: Feature Engineering Experimentation on Human Activity Recognition Weight Lifting
   Exercise Data
 author: "David Simler"
-date: "March 10, 2017"
+date: "March 13, 2017"
 output: html_document
 ---
 
@@ -247,9 +247,12 @@ The following candidate models will be created, trained, and cross-validated usi
 
 * A multinomial (multiclass) logistic regression (multinom) classifier
 
+* A sigmoidal neural network with one hidden layer (nnet)
+
 * A naive bayes (nb) classifier
 
-* A support vector machines with radial basis function kernel (svmRadial) classifier
+* A support vector machines with radial basis function kernel (svmRadial) classifier  
+
 
 First the tree-based models are trained:
 
@@ -295,6 +298,18 @@ phase0LDAFit <- train(x = wleTrainingData[, -ncol(wleTrainingData)], y = wleTrai
 
 ```
 
+Now build a neural network with one hidden layer:
+
+```{r Phase0NNClassifiers, echo=TRUE, cache=TRUE, warning=FALSE, message=FALSE, results='hide'}
+
+set.seed(reportSeedToUse)
+phase0NNFit <- train(x = wleTrainingData[, -ncol(wleTrainingData)], y = wleTrainingData$classe,
+                        method = "nnet", 
+                        trControl = modelTrainingControl,
+                        verbose = FALSE)
+
+```
+
 Finally, build other miscellaneous non-linear classifiers of interest:
 
 ```{r Phase0MiscClassifiers, echo=TRUE, cache=TRUE, warning=FALSE, message=FALSE}
@@ -325,34 +340,43 @@ phase0SVMFit <- train(x = wleTrainingData[, -ncol(wleTrainingData)], y = wleTrai
 # Define the levels for the comparisons between models created in Phase 0
 ModelComparisonOrderedLevelsPhase0 <- c("xgbTree - rf", "xgbTree - treebag",  
                                         "xgbTree - svmRadial", "xgbTree - nb", "xgbTree - lda", 
-                                        "xgbTree - multinom", "xgbTree - rpart", 
+                                        "xgbTree - multinom", "xgbTree - rpart", "xgbTree - nnet",
                                         "rf - xgbTree", "rf - treebag", 
                                         "rf - svmRadial", "rf - nb", "rf - lda", "rf - multinom", "rf - rpart", 
+                                        "rf - nnet",
                                         "treebag - xgbTree", "treebag - rf", "treebag - svmRadial",
                                         "treebag - nb", "treebag - lda", "treebag - multinom", "treebag - rpart",
+                                        "treebag - nnet",
                                         "svmRadial - xgbTree", "svmRadial - rf", "svmRadial - treebag",
                                         "svmRadial - nb", "svmRadial - lda", 
-                                        "svmRadial - multinom", "svmRadial - rpart",
+                                        "svmRadial - multinom", "svmRadial - rpart", "svmRadial - nnet",
                                         "nb - xgbTree", "nb - rf", "nb - treebag", 
                                         "nb - svmRadial", "nb - lda", "nb - multinom", "nb - rpart",
+                                        "nb - nnet", 
                                         "lda - xgbTree", "lda - rf", "lda - treebag", 
                                         "lda - svmRadial", "lda - nb", "lda - multinom", "lda - rpart", 
+                                        "lda - nnet",
                                         "multinom - xgbTree", "multinom - rf", "multinom - treebag",
                                         "multinom - gbm", "multinom - svmRadial", "multinom - nb", 
-                                        "multinom - lda", "multinom - rpart",
+                                        "multinom - lda", "multinom - rpart", "multinom - nnet",
                                         "rpart - xgbTree", "rpart - rf", "rpart - treebag", 
                                         "rpart - svmRadial", "rpart - nb",  "rpart - lda", 
-                                        "rpart - multinom")
+                                        "rpart - multinom", "rpart - nnet",
+                                        "nnet - xgbTree", "nnet - rf", "nnet - treebag", 
+                                        "nnet - svmRadial", "nnet - nb",  "nnet - lda", 
+                                        "nnet - multinom", "nnet - rpart")
 
 # Now build the list of datasets bringing together all the modeling results for Phase 0
-modelResultsPhase0 <- CreateModelPerfResultsDatasetsWWithinPhaseComparison(list(phase0RFFit, phase0XGBoostFit,
+modelResultsPhase0 <- CreateModelPerfResultsDatasetsWWithinPhaseComparison(list(phase0RFFit, 
+                                                                                phase0XGBoostFit,
                                                                                 phase0BaggedTreeFit,
                                                                                 phase0NaiveBayesFit, 
                                                                                 phase0LDAFit,
                                                                                 phase0MultinomialFit,
-                                                                                phase0RpartFit, phase0SVMFit),
+                                                                                phase0RpartFit, 
+                                                                                phase0SVMFit,
+                                                                                phase0NNFit),
                                                                            ModelComparisonOrderedLevelsPhase0)
- 
 
 ```
 
@@ -465,21 +489,28 @@ rpartCompPlot <- ggplot(subset(modelResultsPhase0$ModelPerfComparisons, Model1 =
                         coord_flip() + 
                         xlab("Model Pairwise Comparison") + ylab("CV Error Difference") +
                         ggtitle("rpart Comparisons")
-  
+
+nnetCompPlot <- ggplot(subset(modelResultsPhase0$ModelPerfComparisons, Model1 == "nnet")) + 
+                        geom_boxplot(notch=FALSE, fill="red", aes(x=DiffName, y=OOSErrorDiff)) + 
+                        coord_flip() + 
+                        xlab("Model Pairwise Comparison") + ylab("CV Error Difference") +
+                        ggtitle("nnet Comparisons")
+
+
 # Now arrange all the plots in the order of best to work model (in terms of CV Error)  
 grid.arrange(rfCompPlot, xgbCompPlot, bagCompPlot, svmCompPlot, nbCompPlot, 
-             ldaCompPlot, multinomCompPlot, rpartCompPlot,
-             nrow = 4, ncol = 2)
+             ldaCompPlot, multinomCompPlot, rpartCompPlot, nnetCompPlot,
+             nrow = 5, ncol = 2)
 
 ```
 
 &nbsp;
 
 Now, perform a t-test on each model comparison's mean difference in CV error using the *Bonferroni correction*  $\alpha / m$. Here $m = n! / (n - k)!$, where **m** = total number of comparisons, **n** = number of models, and **k** = number of models in a single comparison. Plugging in the numbers then produces the following:  
-$m = 8! / (8 - 2)! = 56$  
-using the standard $\alpha = 0.05$, the significance level $= 0.05 / 56 = 0.00089$
+$m = 9! / (9 - 2)! = 72$  
+using the standard $\alpha = 0.05$, the significance level $= 0.05 / 72 = 0.00069$
 
-$H_{0}$ will therefore be rejected if for a given model-to-model comparison t-test, the corresponding *p-value* is less than 0.00089. In that case, the data provides convincing evidence that Model 1's error rate is actually lower than Model 2's (i.e. $H_{a}$ is true).
+$H_{0}$ will therefore be rejected if for a given model-to-model comparison t-test, the corresponding *p-value* is less than 0.00069. In that case, the data provides convincing evidence that Model 1's error rate is actually lower than Model 2's (i.e. $H_{a}$ is true).
 
 ```{r, echo=FALSE}
 
@@ -510,7 +541,8 @@ phase0TestPredictionDatasets <- CreateTestPredictionDatasets(list(phase0XGBoostF
                                                                   phase0NaiveBayesFit, 
                                                                   phase0LDAFit,
                                                                   phase0MultinomialFit, 
-                                                                  phase0RpartFit), 
+                                                                  phase0RpartFit,
+                                                                  phase0NNFit), 
                                                              wleTestData, 
                                                              0)
 
@@ -641,6 +673,20 @@ phase1LDAFit <- train(x = reducedCorrTrainingData[, -ncol(reducedCorrTrainingDat
 
 ```
 
+Now build a neural network with one hidden layer:
+
+```{r Phase1NNClassifiers, echo=TRUE, cache=TRUE, warning=FALSE, message=FALSE, results='hide'}
+
+set.seed(reportSeedToUse)
+phase1NNFit <- train(x = reducedCorrTrainingData[, -ncol(reducedCorrTrainingData)], 
+                     y = reducedCorrTrainingData$classe,
+                        method = "nnet", 
+                        trControl = modelTrainingControl,
+                        verbose = FALSE)
+
+```
+
+
 Finally, build other miscellaneous non-linear classifiers of interest:
 
 ```{r Phase1MiscClassifiers, echo=TRUE, cache=TRUE, warning=FALSE, message=FALSE}
@@ -673,22 +719,24 @@ phase1SVMFit <- train(x = reducedCorrTrainingData[, -ncol(reducedCorrTrainingDat
 # -------------------------------------------------------------------------------------------------------
 # Define the model comparisons between Phase 1 to Phase 0
 # -------------------------------------------------------------------------------------------------------
-ModelComparisonOrderedLevelsPhase1 <- c("multinom1 - multinom0",  "lda1 - lda0", "svmRadial1 - svmRadial0", 
-                                        "treebag1 - treebag0", "xgbTree1 - xgbTree0", "rf1 - rf0", 
-                                        "rpart1 - rpart0", "nb1 - nb0",
+ModelComparisonOrderedLevelsPhase1 <- c("multinom1 - multinom0",  "lda1 - lda0", "nnet1 - nnet0", 
+                                        "svmRadial1 - svmRadial0", "treebag1 - treebag0", "xgbTree1 - xgbTree0", 
+                                        "rf1 - rf0", "rpart1 - rpart0", "nb1 - nb0", 
                                         "nb0 - nb1", "rpart0 - rpart1", "rf0 - rf1", "xgbTree0 - xgbTree1", 
-                                        "treebag0 - treebag1",  "svmRadial0 - svmRadial1", "lda0 - lda1", 
-                                        "multinom0 - multinom1") 
+                                        "treebag0 - treebag1",  "svmRadial0 - svmRadial1", "nnet0 - nnet1", 
+                                        "lda0 - lda1", "multinom0 - multinom1") 
 
 
 
 # Now build the list of datasets bringing together all the modeling results for Phase 0
 modelResultsPhase1 <- CreateModelPerfResultsDatasetsWBetweenPhaseComparison(list(phase1RFFit, phase1XGBoostFit,
-                                                                                phase1BaggedTreeFit,
-                                                                                phase1NaiveBayesFit, 
-                                                                                phase1LDAFit,
-                                                                                phase1MultinomialFit,
-                                                                                phase1RpartFit, phase1SVMFit),
+                                                                                 phase1BaggedTreeFit,
+                                                                                 phase1NaiveBayesFit, 
+                                                                                 phase1LDAFit,
+                                                                                 phase1MultinomialFit,
+                                                                                 phase1RpartFit, 
+                                                                                 phase1SVMFit,
+                                                                                 phase1NNFit),
                                                                             modelResultsPhase0$ModelCVErrors,
                                                                             1,
                                                                             0,
@@ -731,7 +779,7 @@ ggplot(modelResultsPhase1$ModelCVErrors) +
 
 Instead of comparing all of the models trained in Phase 1 with each other, we are going to instead compare a model trained in Phase 1 with the same model type in Phase 0 (the baseline) to see if reducing correlated predictor pairs makes results better or worse.  We will need to check both cases (better and worse) by doing all of the t-test comparisons together, but will present the outcome separately for readability.  
 
-Again keeping the *Bonferroni correction* in mind, the significance values used for each of the t-tests will be different this time, i.e. the significance level $= 0.05 / 16 = 0.00313$.  16 is the total number of model comparisons calculated as $m_{Total} = n * m_{ComparisonsPerModel}$ where $n = 8$ is the number of models each with $m_{ComparisonsPerModel} = 2$ comparisons: Phase 1 Mean CV Error < Phase 0 Mean CV Error, and Phase 0 Mean CV Error < Phase 1 Mean CV Error for the model in question.
+Again keeping the *Bonferroni correction* in mind, the significance values used for each of the t-tests will be different this time, i.e. the significance level $= 0.05 / 18 = 0.0028$.  18 is the total number of model comparisons calculated as $m_{Total} = n * m_{ComparisonsPerModel}$ where $n = 9$ is the number of models each with $m_{ComparisonsPerModel} = 2$ comparisons: Phase 1 Mean CV Error < Phase 0 Mean CV Error, and Phase 0 Mean CV Error < Phase 1 Mean CV Error for the model in question.
 
 
 &nbsp;
@@ -845,8 +893,9 @@ phase1TestPredictionDatasets <- CreateTestPredictionDatasets(list(phase1XGBoostF
                                                                   phase1BaggedTreeFit, 
                                                                   phase1SVMFit, 
                                                                   phase1NaiveBayesFit, 
-                                                                  phase1LDAFit,
                                                                   phase1MultinomialFit, 
+                                                                  phase1LDAFit,
+                                                                  phase1NNFit,
                                                                   phase1RpartFit), 
                                                              reducedCorrTestData, 
                                                              1,
@@ -889,13 +938,13 @@ ggplot(phase1TestPredictionDatasets$MeltedTestResults, aes(Classe, ObservationLa
 
 __From the data given above, we can conclude the following:__
 
-* *In this phase, the classifier with the lowest error rate was the Random Forest (as opposed to Phase 0 where it was the Gradient Boosted Tree).  The classifier with the highest error rate was again the RPart decision tree (althought its error rate was slightly lower this time).* 
+* *In this phase, the classifier with the lowest error rate was the Random Forest (as opposed to Phase 0 where it was the Gradient Boosted Tree).  The classifier with the highest error rate was again the Single Hidden Layer Neural Net (nnet - although its error rate was slightly lower this time).* 
 
 * *The data presented in this report provides evidence that training on a dataset where all correlated predictor pairs were removed from the Phase 0 training set, yielded classifiers that actually performed WORSE (i.e. had a higher CV error rate) than those created in Phase 0 for the following models: Random Forest (rf), eXtreme Gradient Boosted Trees (xgbTree), Bagged Trees (treeBag), Linear Discriminant Analysis (lda), Multinomial Logistic Regression (multinom), and Support Vector Machine with Radial Basis Function Kernal (svmRadial).* 
 
 * *The evidence also shows that only the Naive Bayes (nb) classifier actually lowered its error rate (by ~2%) when correlated predictors were removed from the Phase 0 training set. * 
 
-* *Despite the statistically significant decrease in performance, the four classifiers with the lowest CV errors (rf, xgbTree, treeBag, and svmRadial) still generalized very well to the small test set with 0% error as in Phase 0. The Multinomial Logistic Regression (multinom) and RPart Decision Tree (rpart) classifiers saw their error rates reduced by 5% (to .35 and .55 respectively). Only the LDA classifier showed worse performance (error rate up 10% from .3 to .4)* 
+* *Despite the statistically significant decrease in performance, the four classifiers with the lowest CV errors (rf, xgbTree, treeBag, and svmRadial) still generalized very well to the small test set with 0% error as in Phase 0. The Multinomial Logistic Regression (multinom), Single Hidden Layer Neural Net (nnet), and RPart Decision Tree (rpart) classifiers saw their error rates reduced by 5% or more (to .35, .45, and .55 respectively). Only the LDA classifier showed worse performance (error rate up 10% from .3 to .4)* 
 
 
 *****
@@ -984,6 +1033,20 @@ phase2LDAFit <- train(x = standardizedTrainingData[, -ncol(standardizedTrainingD
 
 ```
 
+
+Now build a neural network with one hidden layer:
+
+```{r Phase2NNClassifiers, echo=TRUE, cache=TRUE, warning=FALSE, message=FALSE, results='hide'}
+
+set.seed(reportSeedToUse)
+phase2NNFit <- train(x = standardizedTrainingData[, -ncol(standardizedTrainingData)], 
+                     y = standardizedTrainingData$classe,
+                        method = "nnet", 
+                        trControl = modelTrainingControl,
+                        verbose = FALSE)
+
+```
+
 Finally, build other miscellaneous non-linear classifiers of interest:
 
 ```{r Phase2MiscClassifiers, echo=TRUE, cache=TRUE, warning=FALSE, message=FALSE}
@@ -1013,10 +1076,11 @@ phase2SVMFit <- train(x = standardizedTrainingData[, -ncol(standardizedTrainingD
 # -------------------------------------------------------------------------------------------------------
 ModelComparisonOrderedLevelsPhase2 <- c("xgbTree2 - xgbTree0", "rf2 - rf0", "treebag2 - treebag0", 
                                         "svmRadial2 - svmRadial0", "nb2 - nb0", 
-                                        "multinom2 - multinom0", "lda2 - lda0", "rpart2 - rpart0",
-                                        "xgbTree0 - xgbTree2", "rf0 - rf2", "treebag0 - treebag2",
-                                        "svmRadial0 - svmRadial2", "nb0 - nb2", 
-                                        "multinom0 - multinom2", "lda0 - lda2", "rpart0 - rpart2") 
+                                        "lda2 - lda0", "rpart2 - rpart0",
+                                        "multinom2 - multinom0", "nnet2 - nnet0",
+                                        "nnet0 - nnet2", "multinom0 - multinom2", "rpart0 - rpart2",
+                                        "lda0 - lda2", "nb0 - nb2", "svmRadial0 - svmRadial2",
+                                        "treebag0 - treebag2", "rf0 - rf2", "xgbTree0 - xgbTree2") 
 
 
 # Now build the list of datasets bringing together all the modeling results for Phase 2
@@ -1026,7 +1090,9 @@ modelResultsPhase2 <- CreateModelPerfResultsDatasetsWBetweenPhaseComparison(list
                                                                                 phase2NaiveBayesFit, 
                                                                                 phase2LDAFit,
                                                                                 phase2MultinomialFit,
-                                                                                phase2RpartFit, phase2SVMFit),
+                                                                                phase2RpartFit, 
+                                                                                phase2SVMFit,
+                                                                                phase2NNFit),
                                                                            modelResultsPhase0$ModelCVErrors,
                                                                            2,
                                                                            0,
@@ -1067,7 +1133,7 @@ ggplot(modelResultsPhase2$ModelCVErrors) +
 
 Just like in Phase 1, here all of the models trained in Phase 2 with the same model type in Phase 0 (the baseline) to see if standardizing numeric predictors makes results better or worse.  We will need to check both cases (better and worse) by doing all of the t-test comparisons together, but will present the outcome separately for readability.  
 
-Again keeping the *Bonferroni correction* in mind, the significance values used for each of the t-tests will be different this time, i.e. the significance level $= 0.05 / 16 = 0.00313$.  16 is the total number of model comparisons calculated as $m_{Total} = n * m_{ComparisonsPerModel}$ where $n = 8$ is the number of models each with $m_{ComparisonsPerModel} = 2$ comparisons: Phase 2 Mean CV Error < Phase 0 Mean CV Error, and Phase 0 Mean CV Error < Phase 2 Mean CV Error for the model in question.
+Again keeping the *Bonferroni correction* in mind, the significance values used for each of the t-tests will be different this time, i.e. the significance level $= 0.05 / 18 = 0.0028$.  18 is the total number of model comparisons calculated as $m_{Total} = n * m_{ComparisonsPerModel}$ where $n = 9$ is the number of models each with $m_{ComparisonsPerModel} = 2$ comparisons: Phase 2 Mean CV Error < Phase 0 Mean CV Error, and Phase 0 Mean CV Error < Phase 2 Mean CV Error for the model in question.
 
 
 &nbsp;
@@ -1180,9 +1246,10 @@ phase2TestPredictionDatasets <- CreateTestPredictionDatasets(list(phase2XGBoostF
                                                                   phase2RFFit, 
                                                                   phase2BaggedTreeFit, 
                                                                   phase2SVMFit, 
-                                                                  phase2NaiveBayesFit, 
-                                                                  phase2LDAFit,
                                                                   phase2MultinomialFit, 
+                                                                  phase2LDAFit,
+                                                                  phase2NaiveBayesFit,
+                                                                  phase2NNFit,
                                                                   phase2RpartFit), 
                                                              standardizedTestData,
                                                              2,
@@ -1205,7 +1272,7 @@ pander(phase2TestPredictionDatasets$ModelTestPerfSummary, caption = "Table 8: Er
 
 Additionally, shown below are heat maps of each model's predictions:
 
-```{r, echo=FALSE, fig.path="figures/", fig.align='center', fig.cap='Figure 9: Heat map of predictions on the test set with five classes for each model type. The true classes are shown in the row labels while columns quantify the probabilities for each class (labeled A through E)', fig.height=14, fig.width=14, fig.show='asis', warning=FALSE}
+```{r, echo=FALSE, fig.path="figures/", fig.align='center', fig.cap='Figure 11: Heat map of predictions on the test set with five classes for each model type. The true classes are shown in the row labels while columns quantify the probabilities for each class (labeled A through E)', fig.height=14, fig.width=14, fig.show='asis', warning=FALSE}
 
 # ggplot(subset(phase0TestPredictionDatasets$MeltedTestResults, Model != "svmRadial"), aes(Classe, ObservationLabel)) + 
 ggplot(phase2TestPredictionDatasets$MeltedTestResults, aes(Classe, ObservationLabel)) + 
@@ -1227,9 +1294,9 @@ __From the data given above, we can conclude the following:__
 
 * *In this phase, the classifier with the lowest error rate was the was the Gradient Boosted Tree (0.003659).  The classifier with the highest error rate was the RPart decision tree (.4943).* 
 
-* *The data presented in this report provides evidence that training on a dataset where all numeric predictors were standardized ONLY reduces the error for the Mulinomial Logistic Regression (multinom) classifier.*  This was a bit of a surprise, as it was expected that the Naive Bayes, LDA, and SVM classifiers would show improvement in their error rates.  It is possible that internally some of these classifiers are already doing the scaling on the training sets, in which case scaling as part of pre-processing upstream from training would be unnecessary. 
+* *The data presented in this report provides evidence that training on a dataset where all numeric predictors were standardized ONLY reduces the error for the Mulinomial Logistic Regression (multinom) and Single Hidden Layer Neural Network (nnet) classifiers.*  This was a bit of a surprise, as it was expected that the Naive Bayes, LDA, and SVM classifiers would show improvement in their error rates.  It is possible that internally some of these classifiers are already doing the scaling on the training sets, in which case scaling as part of pre-processing upstream from training would be unnecessary. 
 
-* *The Multinomial Logistic Regression (multinom) showed significant reduction in its test error, down 15% from .4 to .25 from Phase 0 to Phase 2. All other classifiers had no change in their error rates from Phase 0 to Phase 2.* 
+* *The Multinomial Logistic Regression (multinom) and Single Hidden Layer Neural Network (nnet) classifiers also showed significant reduction in their test error, down 15% (from .4 to .25) and 25% (from  .6 to .35) respectively from Phase 0 to Phase 2. All other classifiers had no change in their error rates from Phase 0 to Phase 2.* 
 
 
 *****
